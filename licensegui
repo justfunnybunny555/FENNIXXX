@@ -12,6 +12,19 @@ local HttpService = game:GetService("HttpService")
 local KeyAuthApp = "FENNIXXX"
 local KeyAuthOwnerID = "edcEgR58Gp"
 local KeyAuthVersion = "1.0"
+local KeyAuthAPI = "https://keyauth.win/api/1.2/" -- API endpoint
+
+-- Переменная для проверки авторизации
+local isAuthorized = false
+local userHWID = nil
+
+-- Функция получения HWID
+local function getHWID()
+    local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
+    return hwid
+end
+
+userHWID = getHWID()
 
 -- Переменная для проверки авторизации
 local isAuthorized = false
