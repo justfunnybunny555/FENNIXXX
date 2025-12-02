@@ -8,15 +8,15 @@ local TweenService = game:GetService("TweenService")
 local CoreGui = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
 
--- KeyAuth Configuration
+--- KeyAuth Configuration
 local KeyAuthApp = "FENNIXXX"
 local KeyAuthOwnerID = "edcEgR58Gp"
 local KeyAuthVersion = "1.0"
-local KeyAuthAPI = "https://keyauth.win/api/1.2/" -- API endpoint
+local KeyAuthURL = "https://keyauth.win/api/1.2/"
 
 -- Переменная для проверки авторизации
 local isAuthorized = false
-local userHWID = nil
+local sessionID = ""
 
 -- Функция получения HWID
 local function getHWID()
@@ -24,10 +24,107 @@ local function getHWID()
     return hwid
 end
 
-userHWID = getHWID()
+-- Функция инициализации KeyAuth
+local function initKeyAuth()
+    local success, response = pcall(function()
+        return request({
+            Url = KeyAuthURL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/x-www-form-urlencoded"
+            },
+            Body = "type=init&ver=" .. KeyAuthVersion .. "&name=" .. KeyAuthApp .. "&ownerid=" .. KeyAuthOwnerID
+        })
+    end)
+    
+    if not success then
+        warn("KeyAuth init request failed: " .. tostring(response))
+        return false, "Connection failed"
+    end
+    
+    if response.StatusCode == 200 then
+        local decodeSuccess, data = pcall(function()
+            return HttpService:JSONDecode(response.Body)
+        end)
+        
+        if decodeSuccess then
+            if data.success then
+                sessionID = data.sessionid
+                return true, "Initialized"
+            else
+                warn("KeyAuth init failed: " .. (data.message or "Unknown error"))
+                return false, data.message or "Init failed"
+            end
+        else
+            warn("KeyAuth init decode failed: " .. response.Body)
+            return false, "Invalid response"
+        end
+    else
+        warn("KeyAuth init status code: " .. response.StatusCode)
+        return false, "Server error: " .. response.StatusCode
+    end
+end
 
--- Переменная для проверки авторизации
-local isAuthorized = false
+-- Функция проверки лицензии
+local function verifyLicense(key)
+    if not sessionID or sessionID == "" then
+        local initSuccess, initMsg = initKeyAuth()
+        if not initSuccess then
+            return false, "Failed to initialize: " .. initMsg
+        end
+        wait(0.5) -- Небольшая задержка после инициализации
+    end
+    
+    local hwid = getHWID()
+    
+    local success, response = pcall(function()
+        return request({
+            Url = KeyAuthURL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/x-www-form-urlencoded"
+            },
+            Body = "type=license&key=" .. HttpService:UrlEncode(key) .. 
+                   "&sessionid=" .. sessionID .. 
+                   "&name=" .. KeyAuthApp .. 
+                   "&ownerid=" .. KeyAuthOwnerID .. 
+                   "&hwid=" .. hwid
+        })
+    end)
+    
+    if not success then
+        warn("KeyAuth license request failed: " .. tostring(response))
+        return false, "Connection failed"
+    end
+    
+    if response.StatusCode == 200 then
+        local decodeSuccess, data = pcall(function()
+            return HttpService:JSONDecode(response.Body)
+        end)
+        
+        if decodeSuccess then
+            if data.success then
+                local exp = "Lifetime"
+                if data.info and data.info.subscriptions then
+                    for _, sub in pairs(data.info.subscriptions) do
+                        if sub.expiry and sub.expiry ~= "lifetime" then
+                            exp = os.date("%m/%d/%Y %H:%M", tonumber(sub.expiry))
+                        end
+                    end
+                end
+                return true, "License verified! Expires: " .. exp
+            else
+                return false, data.message or "Invalid license key"
+            end
+        else
+            warn("KeyAuth license decode failed: " .. response.Body)
+            return false, "Invalid response from server"
+        end
+    else
+        warn("KeyAuth license status code: " .. response.StatusCode .. " Body: " .. response.Body)
+        return false, "Server error: " .. response.StatusCode
+    end
+end
 
 -- Создание GUI для ввода ключа
 local function createAuthGUI()
@@ -36,7 +133,7 @@ local function createAuthGUI()
     authGui.IgnoreGuiInset = true
     authGui.ResetOnSpawn = false
     authGui.Parent = CoreGui
-
+    
     -- Затемненный фон
     local darkBackground = Instance.new("Frame")
     darkBackground.Size = UDim2.new(1, 0, 1, 0)
@@ -45,7 +142,7 @@ local function createAuthGUI()
     darkBackground.BorderSizePixel = 0
     darkBackground.BackgroundTransparency = 0.1
     darkBackground.Parent = authGui
-
+    
     -- Градиент для фона
     local bgGradient = Instance.new("UIGradient", darkBackground)
     bgGradient.Color = ColorSequence.new{
@@ -54,7 +151,7 @@ local function createAuthGUI()
         ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 20))
     }
     bgGradient.Rotation = 45
-
+    
     -- Создание снежинок
     local snowflakes = {}
     for i = 1, 50 do
@@ -75,7 +172,7 @@ local function createAuthGUI()
             drift = math.random(-10, 10) / 1000
         })
     end
-
+    
     -- Анимация снежинок
     local snowConnection
     snowConnection = RunService.RenderStepped:Connect(function()
@@ -88,38 +185,37 @@ local function createAuthGUI()
                 newY = -0.1
                 newX = math.random(0, 100) / 100
             end
-            
             if newX > 1.1 then newX = -0.1 end
             if newX < -0.1 then newX = 1.1 end
             
             snow.frame.Position = UDim2.new(newX, 0, newY, 0)
         end
     end)
-
+    
     -- Основной фрейм авторизации
     local authFrame = Instance.new("Frame")
-    authFrame.Size = UDim2.new(0, 450, 0, 320)
-    authFrame.Position = UDim2.new(0.5, -225, 0.5, -160)
+    authFrame.Size = UDim2.new(0, 450, 0, 360)
+    authFrame.Position = UDim2.new(0.5, -225, 0.5, -180)
     authFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
     authFrame.BorderSizePixel = 0
     authFrame.BackgroundTransparency = 0.05
     authFrame.Parent = authGui
-
+    
     local authCorner = Instance.new("UICorner", authFrame)
     authCorner.CornerRadius = UDim.new(0, 20)
-
+    
     -- Неоновая обводка
     local authStroke = Instance.new("UIStroke", authFrame)
     authStroke.Color = Color3.fromRGB(100, 150, 255)
     authStroke.Thickness = 3
     authStroke.Transparency = 0.3
-
+    
     -- Анимация свечения обводки
     local glowTween = TweenService:Create(authStroke, TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
         Color = Color3.fromRGB(150, 100, 255)
     })
     glowTween:Play()
-
+    
     -- Градиент фрейма
     local authGradient = Instance.new("UIGradient", authFrame)
     authGradient.Color = ColorSequence.new{
@@ -128,7 +224,7 @@ local function createAuthGUI()
         ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 35))
     }
     authGradient.Rotation = 90
-
+    
     -- Иконка замка
     local lockIcon = Instance.new("TextLabel")
     lockIcon.Size = UDim2.new(0, 60, 0, 60)
@@ -137,13 +233,13 @@ local function createAuthGUI()
     lockIcon.TextSize = 48
     lockIcon.BackgroundTransparency = 1
     lockIcon.Parent = authFrame
-
+    
     -- Анимация иконки
     local iconTween = TweenService:Create(lockIcon, TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
         Rotation = 10
     })
     iconTween:Play()
-
+    
     -- Заголовок
     local titleLabel = Instance.new("TextLabel")
     titleLabel.Size = UDim2.new(1, 0, 0, 50)
@@ -154,7 +250,7 @@ local function createAuthGUI()
     titleLabel.Font = Enum.Font.GothamBold
     titleLabel.BackgroundTransparency = 1
     titleLabel.Parent = authFrame
-
+    
     -- Подзаголовок
     local subtitleLabel = Instance.new("TextLabel")
     subtitleLabel.Size = UDim2.new(1, 0, 0, 30)
@@ -165,11 +261,47 @@ local function createAuthGUI()
     subtitleLabel.Font = Enum.Font.Gotham
     subtitleLabel.BackgroundTransparency = 1
     subtitleLabel.Parent = authFrame
-
+    
+    -- HWID Display
+    local hwidLabel = Instance.new("TextLabel")
+    hwidLabel.Size = UDim2.new(1, -30, 0, 20)
+    hwidLabel.Position = UDim2.new(0, 15, 0, 160)
+    hwidLabel.Text = "HWID: " .. getHWID()
+    hwidLabel.TextColor3 = Color3.fromRGB(100, 120, 150)
+    hwidLabel.TextSize = 10
+    hwidLabel.Font = Enum.Font.GothamMedium
+    hwidLabel.BackgroundTransparency = 1
+    hwidLabel.TextXAlignment = Enum.TextXAlignment.Left
+    hwidLabel.Parent = authFrame
+    
+    -- Copy HWID Button
+    local copyHWIDBtn = Instance.new("TextButton")
+    copyHWIDBtn.Size = UDim2.new(0, 60, 0, 20)
+    copyHWIDBtn.Position = UDim2.new(1, -75, 0, 160)
+    copyHWIDBtn.BackgroundColor3 = Color3.fromRGB(60, 80, 150)
+    copyHWIDBtn.Text = "COPY"
+    copyHWIDBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    copyHWIDBtn.TextSize = 10
+    copyHWIDBtn.Font = Enum.Font.GothamBold
+    copyHWIDBtn.BorderSizePixel = 0
+    copyHWIDBtn.Parent = authFrame
+    
+    local copyCorner = Instance.new("UICorner", copyHWIDBtn)
+    copyCorner.CornerRadius = UDim.new(0, 6)
+    
+    copyHWIDBtn.MouseButton1Click:Connect(function()
+        setclipboard(getHWID())
+        copyHWIDBtn.Text = "✓"
+        copyHWIDBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+        wait(1)
+        copyHWIDBtn.Text = "COPY"
+        copyHWIDBtn.BackgroundColor3 = Color3.fromRGB(60, 80, 150)
+    end)
+    
     -- Поле ввода ключа
     local keyBox = Instance.new("TextBox")
     keyBox.Size = UDim2.new(0, 380, 0, 50)
-    keyBox.Position = UDim2.new(0.5, -190, 0, 175)
+    keyBox.Position = UDim2.new(0.5, -190, 0, 195)
     keyBox.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
     keyBox.Text = ""
     keyBox.PlaceholderText = "KEYAUTH-XXXXX-XXXXX-XXXXX"
@@ -180,15 +312,15 @@ local function createAuthGUI()
     keyBox.BorderSizePixel = 0
     keyBox.ClearTextOnFocus = false
     keyBox.Parent = authFrame
-
+    
     local keyBoxCorner = Instance.new("UICorner", keyBox)
     keyBoxCorner.CornerRadius = UDim.new(0, 12)
-
+    
     local keyBoxStroke = Instance.new("UIStroke", keyBox)
     keyBoxStroke.Color = Color3.fromRGB(60, 80, 150)
     keyBoxStroke.Thickness = 2
     keyBoxStroke.Transparency = 0.5
-
+    
     -- Анимация при фокусе
     keyBox.Focused:Connect(function()
         TweenService:Create(keyBoxStroke, TweenInfo.new(0.3), {
@@ -196,18 +328,18 @@ local function createAuthGUI()
             Transparency = 0
         }):Play()
     end)
-
+    
     keyBox.FocusLost:Connect(function()
         TweenService:Create(keyBoxStroke, TweenInfo.new(0.3), {
             Color = Color3.fromRGB(60, 80, 150),
             Transparency = 0.5
         }):Play()
     end)
-
+    
     -- Кнопка подтверждения
     local submitBtn = Instance.new("TextButton")
     submitBtn.Size = UDim2.new(0, 180, 0, 45)
-    submitBtn.Position = UDim2.new(0.5, -90, 0, 245)
+    submitBtn.Position = UDim2.new(0.5, -90, 0, 265)
     submitBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 255)
     submitBtn.Text = "VERIFY KEY"
     submitBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -215,166 +347,63 @@ local function createAuthGUI()
     submitBtn.Font = Enum.Font.GothamBold
     submitBtn.BorderSizePixel = 0
     submitBtn.Parent = authFrame
-
+    
     local submitBtnCorner = Instance.new("UICorner", submitBtn)
     submitBtnCorner.CornerRadius = UDim.new(0, 12)
-
+    
     local submitBtnStroke = Instance.new("UIStroke", submitBtn)
     submitBtnStroke.Color = Color3.fromRGB(150, 180, 255)
     submitBtnStroke.Thickness = 2
-
+    
     local submitGradient = Instance.new("UIGradient", submitBtn)
     submitGradient.Color = ColorSequence.new{
         ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 140, 255)),
         ColorSequenceKeypoint.new(1, Color3.fromRGB(80, 120, 255))
     }
     submitGradient.Rotation = 90
-
+    
     -- Статус
     local statusLabel = Instance.new("TextLabel")
     statusLabel.Size = UDim2.new(1, 0, 0, 20)
-    statusLabel.Position = UDim2.new(0, 0, 1, -25)
+    statusLabel.Position = UDim2.new(0, 0, 1, -35)
     statusLabel.Text = ""
     statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
     statusLabel.TextSize = 12
     statusLabel.Font = Enum.Font.GothamBold
     statusLabel.BackgroundTransparency = 1
     statusLabel.Parent = authFrame
-
--- Функция проверки ключа
-local function verifyKey()
-    local key = keyBox.Text
     
-    if key == "" or #key < 10 then
-        statusLabel.Text = "❌ Please enter a valid key"
-        statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-        
-        -- Тряска при ошибке
-        local originalPos = authFrame.Position
-        for i = 1, 3 do
-            TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos + UDim2.new(0, 10, 0, 0)}):Play()
-            wait(0.05)
-            TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos - UDim2.new(0, 10, 0, 0)}):Play()
-            wait(0.05)
-        end
-        authFrame.Position = originalPos
-        return
-    end
-
-    submitBtn.Text = "VERIFYING..."
-    submitBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 120)
-    statusLabel.Text = "⏳ Checking license..."
-    statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-
-    -- Подготовка данных для запроса
-    local requestData = {
-        type = "license",
-        key = key,
-        hwid = userHWID,
-        name = KeyAuthApp,
-        ownerid = KeyAuthOwnerID,
-        version = KeyAuthVersion
-    }
+    -- Get Key Button
+    local getKeyBtn = Instance.new("TextButton")
+    getKeyBtn.Size = UDim2.new(0, 140, 0, 25)
+    getKeyBtn.Position = UDim2.new(0.5, -70, 1, -60)
+    getKeyBtn.BackgroundColor3 = Color3.fromRGB(50, 70, 120)
+    getKeyBtn.Text = "Get License Key"
+    getKeyBtn.TextColor3 = Color3.fromRGB(200, 220, 255)
+    getKeyBtn.TextSize = 12
+    getKeyBtn.Font = Enum.Font.GothamBold
+    getKeyBtn.BorderSizePixel = 0
+    getKeyBtn.Parent = authFrame
     
-    -- Отправка запроса к KeyAuth API
-    local success, response = pcall(function()
-        return HttpService:JSONDecode(
-            game:HttpGet(KeyAuthAPI .. "?" .. HttpService:UrlEncode(HttpService:JSONEncode(requestData)))
-        )
+    local getKeyCorner = Instance.new("UICorner", getKeyBtn)
+    getKeyCorner.CornerRadius = UDim.new(0, 8)
+    
+    getKeyBtn.MouseButton1Click:Connect(function()
+        setclipboard("https://keyauth.win/panel/" .. KeyAuthApp .. "/licenses")
+        getKeyBtn.Text = "Link Copied!"
+        getKeyBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+        wait(2)
+        getKeyBtn.Text = "Get License Key"
+        getKeyBtn.BackgroundColor3 = Color3.fromRGB(50, 70, 120)
     end)
     
-    task.wait(1.5)
-    
-    if success and response then
-        if response.success == true then
-            -- Проверка HWID
-            if response.info and response.info.hwid then
-                if response.info.hwid == userHWID or response.info.hwid == "" then
-                    -- HWID совпадает или не привязан - привязываем
-                    isAuthorized = true
-                    statusLabel.Text = "✅ License verified successfully!"
-                    statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-                    
-                    -- Отправляем обновление HWID на сервер
-                    pcall(function()
-                        local updateData = {
-                            type = "setvar",
-                            var = "hwid",
-                            data = userHWID,
-                            key = key,
-                            name = KeyAuthApp,
-                            ownerid = KeyAuthOwnerID
-                        }
-                        game:HttpGet(KeyAuthAPI .. "?" .. HttpService:UrlEncode(HttpService:JSONEncode(updateData)))
-                    end)
-                    
-                    -- Анимация успеха
-                    lockIcon.Text = "✓"
-                    TweenService:Create(lockIcon, TweenInfo.new(0.5), {
-                        TextColor3 = Color3.fromRGB(100, 255, 100),
-                        TextSize = 60
-                    }):Play()
-                    
-                    TweenService:Create(submitBtn, TweenInfo.new(0.5), {
-                        BackgroundColor3 = Color3.fromRGB(100, 255, 100)
-                    }):Play()
-                    
-                    task.wait(1)
-                    
-                    -- Плавное исчезновение
-                    snowConnection:Disconnect()
-                    
-                    TweenService:Create(authFrame, TweenInfo.new(0.8, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-                        Size = UDim2.new(0, 0, 0, 0),
-                        Position = UDim2.new(0.5, 0, 0.5, 0),
-                        BackgroundTransparency = 1
-                    }):Play()
-                    
-                    TweenService:Create(darkBackground, TweenInfo.new(0.8), {
-                        BackgroundTransparency = 1
-                    }):Play()
-                    
-                    for _, snow in ipairs(snowflakes) do
-                        TweenService:Create(snow.frame, TweenInfo.new(0.8), {
-                            BackgroundTransparency = 1
-                        }):Play()
-                    end
-                    
-                    task.wait(0.8)
-                    authGui:Destroy()
-                    initializeScript()
-                else
-                    -- HWID не совпадает
-                    submitBtn.Text = "VERIFY KEY"
-                    submitBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 255)
-                    statusLabel.Text = "❌ License already used on another device"
-                    statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-                    
-                    -- Тряска при ошибке
-                    local originalPos = authFrame.Position
-                    for i = 1, 3 do
-                        TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos + UDim2.new(0, 10, 0, 0)}):Play()
-                        wait(0.05)
-                        TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos - UDim2.new(0, 10, 0, 0)}):Play()
-                        wait(0.05)
-                    end
-                    authFrame.Position = originalPos
-                end
-            else
-                -- Нет информации о HWID в ответе
-                submitBtn.Text = "VERIFY KEY"
-                submitBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 255)
-                statusLabel.Text = "❌ Server error - try again"
-                statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-            end
-        else
-            -- Ключ недействителен
-            submitBtn.Text = "VERIFY KEY"
-            submitBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 255)
-            statusLabel.Text = "❌ " .. (response.message or "Invalid license key")
+    -- Функция проверки ключа
+    local function verifyKey()
+        local key = keyBox.Text
+        if key == "" or #key < 10 then
+            statusLabel.Text = "❌ Please enter a valid key"
             statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
             
-            -- Тряска при ошибке
             local originalPos = authFrame.Position
             for i = 1, 3 do
                 TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos + UDim2.new(0, 10, 0, 0)}):Play()
@@ -383,54 +412,51 @@ local function verifyKey()
                 wait(0.05)
             end
             authFrame.Position = originalPos
+            return
         end
-    else
-        -- Ошибка подключения
-        submitBtn.Text = "VERIFY KEY"
-        submitBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 255)
-        statusLabel.Text = "❌ Connection error - check internet"
-        statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
         
-        -- Тряска при ошибке
-        local originalPos = authFrame.Position
-        for i = 1, 3 do
-            TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos + UDim2.new(0, 10, 0, 0)}):Play()
-            wait(0.05)
-            TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos - UDim2.new(0, 10, 0, 0)}):Play()
-            wait(0.05)
-        end
-        authFrame.Position = originalPos
-    end
-end
+        submitBtn.Text = "VERIFYING..."
+        submitBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 120)
+        statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
         
-        -- Проверяем формат ключа
-        if string.match(key, "KEYAUTH%-[%w]+%-[%w]+%-[%w]+") or key == "test" then
+        local loading = true
+        spawn(function()
+            local dotCount = 0
+            while loading do
+                statusLabel.Text = "⏳ Checking license" .. string.rep(".", (dotCount % 4))
+                dotCount = dotCount + 1
+                wait(0.5)
+            end
+        end)
+        
+        local verifySuccess, success, message = pcall(function()
+            return verifyLicense(key)
+        end)
+        
+        loading = false
+        
+        if verifySuccess and success then
             isAuthorized = true
-            statusLabel.Text = "✅ License verified successfully!"
+            statusLabel.Text = "✅ " .. message
             statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
             
-            -- Анимация успеха
             lockIcon.Text = "✓"
             TweenService:Create(lockIcon, TweenInfo.new(0.5), {
                 TextColor3 = Color3.fromRGB(100, 255, 100),
                 TextSize = 60
             }):Play()
-            
             TweenService:Create(submitBtn, TweenInfo.new(0.5), {
                 BackgroundColor3 = Color3.fromRGB(100, 255, 100)
             }):Play()
             
-            task.wait(1)
+            wait(2)
             
-            -- Плавное исчезновение
             snowConnection:Disconnect()
-            
             TweenService:Create(authFrame, TweenInfo.new(0.8, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
                 Size = UDim2.new(0, 0, 0, 0),
                 Position = UDim2.new(0.5, 0, 0.5, 0),
                 BackgroundTransparency = 1
             }):Play()
-            
             TweenService:Create(darkBackground, TweenInfo.new(0.8), {
                 BackgroundTransparency = 1
             }):Play()
@@ -441,16 +467,15 @@ end
                 }):Play()
             end
             
-            task.wait(0.8)
+            wait(0.8)
             authGui:Destroy()
             initializeScript()
         else
             submitBtn.Text = "VERIFY KEY"
             submitBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 255)
-            statusLabel.Text = "❌ Invalid license key"
+            statusLabel.Text = "❌ " .. (message or "Verification failed")
             statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
             
-            -- Тряска при ошибке
             local originalPos = authFrame.Position
             for i = 1, 3 do
                 TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos + UDim2.new(0, 10, 0, 0)}):Play()
@@ -461,22 +486,21 @@ end
             authFrame.Position = originalPos
         end
     end
-
-    submitBtn.MouseButton1Click:Connect(verifyKey)
     
+    submitBtn.MouseButton1Click:Connect(verifyKey)
     keyBox.FocusLost:Connect(function(enterPressed)
         if enterPressed then
             verifyKey()
         end
     end)
-
+    
     submitBtn.MouseEnter:Connect(function()
         TweenService:Create(submitBtn, TweenInfo.new(0.2), {
             Size = UDim2.new(0, 190, 0, 48),
             BackgroundColor3 = Color3.fromRGB(100, 140, 255)
         }):Play()
     end)
-
+    
     submitBtn.MouseLeave:Connect(function()
         if submitBtn.Text == "VERIFY KEY" then
             TweenService:Create(submitBtn, TweenInfo.new(0.2), {
@@ -485,15 +509,14 @@ end
             }):Play()
         end
     end)
-
+    
     -- Анимация появления
     authFrame.Size = UDim2.new(0, 0, 0, 0)
     authFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
     authFrame.BackgroundTransparency = 1
-    
     TweenService:Create(authFrame, TweenInfo.new(0.8, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.new(0, 450, 0, 320),
-        Position = UDim2.new(0.5, -225, 0.5, -160),
+        Size = UDim2.new(0, 450, 0, 360),
+        Position = UDim2.new(0.5, -225, 0.5, -180),
         BackgroundTransparency = 0.05
     }):Play()
 end
@@ -522,11 +545,11 @@ local Config = {
     Multipoint = true,
     MultipointSize = 5,
     ShowTargeting = true,
-    
+ 
     UpdateRate = 3,
     MaxPlayersToCheck = 15,
     UseSpatialOptimization = true,
-    
+ 
     WeaponProfiles = {
         ["Revolver"] = {
             Prediction = Vector3.new(0, 0, 0),
@@ -553,7 +576,7 @@ local Config = {
             MaxDistance = 500
         },
         ["AR"] = {
-            Prediction = Vector3.new(0, 0, 0), 
+            Prediction = Vector3.new(0, 0, 0),
             MaxDistance = 450
         },
         ["AK47"] = {
@@ -569,11 +592,11 @@ local Config = {
             MaxDistance = 400
         }
     },
-    
+ 
     CurrentWeapon = nil,
     CurrentPrediction = Vector3.new(0.165, 0.165, 0.165),
     CurrentMaxDistance = 400,
-    
+ 
     -- ESP Settings
     ESP = {
         Enabled = true,
@@ -681,7 +704,7 @@ local ESPObjects = {}
 
 local function createESP(player)
     if ESPObjects[player] then return end
-    
+ 
     local esp = {
         Box = Drawing.new("Square"),
         Name = Drawing.new("Text"),
@@ -690,7 +713,7 @@ local function createESP(player)
         HealthBarOutline = Drawing.new("Square"),
         SkeletonLines = {}
     }
-    
+ 
     for i = 1, #skeletonConnections do
         local line = Drawing.new("Line")
         line.Visible = false
@@ -698,33 +721,33 @@ local function createESP(player)
         line.Transparency = 1
         table.insert(esp.SkeletonLines, line)
     end
-    
+ 
     esp.Box.Visible = false
     esp.Box.Thickness = 2
     esp.Box.Filled = false
     esp.Box.Transparency = 1
-    
+ 
     esp.Name.Visible = false
     esp.Name.Center = true
     esp.Name.Outline = true
     esp.Name.Size = 14
     esp.Name.Font = 2
-    
+ 
     esp.Distance.Visible = false
     esp.Distance.Center = true
     esp.Distance.Outline = true
     esp.Distance.Size = 13
     esp.Distance.Font = 2
-    
+ 
     esp.HealthBar.Visible = false
     esp.HealthBar.Filled = true
     esp.HealthBar.Thickness = 1
-    
+ 
     esp.HealthBarOutline.Visible = false
     esp.HealthBarOutline.Filled = false
     esp.HealthBarOutline.Thickness = 1
     esp.HealthBarOutline.Color = Color3.fromRGB(0, 0, 0)
-    
+ 
     ESPObjects[player] = esp
 end
 
@@ -758,17 +781,17 @@ local function updateESP()
         end
         return
     end
-    
+ 
     for player, esp in pairs(ESPObjects) do
         if player and player.Character and player ~= LocalPlayer then
             local character = player.Character
             local hrp = character:FindFirstChild("HumanoidRootPart")
             local head = character:FindFirstChild("Head")
             local humanoid = character:FindFirstChildOfClass("Humanoid")
-            
+ 
             if hrp and head and humanoid and humanoid.Health > 0 then
                 local distance = (LocalPlayer.Character.HumanoidRootPart.Position - hrp.Position).Magnitude
-                
+ 
                 if distance <= Config.ESP.MaxDistance then
                     if Config.ESP.TeamCheck and LocalPlayer.Team and player.Team and LocalPlayer.Team == player.Team then
                         for key, drawing in pairs(esp) do
@@ -782,14 +805,14 @@ local function updateESP()
                         end
                     else
                         local vector, onScreen = Camera:WorldToViewportPoint(hrp.Position)
-                        
+ 
                         if onScreen then
                             local headPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
                             local legPos = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0))
-                            
+ 
                             local height = math.abs(headPos.Y - legPos.Y)
                             local width = height / 2
-                            
+ 
                             if Config.ESP.ShowBox then
                                 esp.Box.Visible = true
                                 esp.Box.Size = Vector2.new(width, height)
@@ -798,7 +821,7 @@ local function updateESP()
                             else
                                 esp.Box.Visible = false
                             end
-                            
+ 
                             if Config.ESP.ShowName then
                                 esp.Name.Visible = true
                                 esp.Name.Text = player.Name
@@ -807,7 +830,7 @@ local function updateESP()
                             else
                                 esp.Name.Visible = false
                             end
-                            
+ 
                             if Config.ESP.ShowDistance then
                                 esp.Distance.Visible = true
                                 esp.Distance.Text = math.floor(distance) .. "m"
@@ -816,14 +839,14 @@ local function updateESP()
                             else
                                 esp.Distance.Visible = false
                             end
-                            
+ 
                             if Config.ESP.ShowHealth then
                                 local healthPercent = humanoid.Health / humanoid.MaxHealth
-                                
+ 
                                 esp.HealthBarOutline.Visible = true
                                 esp.HealthBarOutline.Size = Vector2.new(4, height + 2)
                                 esp.HealthBarOutline.Position = Vector2.new(vector.X - width / 2 - 8, vector.Y - height / 2 - 1)
-                                
+ 
                                 esp.HealthBar.Visible = true
                                 esp.HealthBar.Size = Vector2.new(2, height * healthPercent)
                                 esp.HealthBar.Position = Vector2.new(vector.X - width / 2 - 7, vector.Y + height / 2 - height * healthPercent)
@@ -836,16 +859,16 @@ local function updateESP()
                                 esp.HealthBar.Visible = false
                                 esp.HealthBarOutline.Visible = false
                             end
-                            
+ 
                             if Config.ESP.ShowSkeleton then
                                 for i, connection in ipairs(skeletonConnections) do
                                     local part1 = character:FindFirstChild(connection[1])
                                     local part2 = character:FindFirstChild(connection[2])
-                                    
+ 
                                     if part1 and part2 and esp.SkeletonLines[i] then
                                         local pos1, vis1 = Camera:WorldToViewportPoint(part1.Position)
                                         local pos2, vis2 = Camera:WorldToViewportPoint(part2.Position)
-                                        
+ 
                                         if vis1 and vis2 then
                                             esp.SkeletonLines[i].Visible = true
                                             esp.SkeletonLines[i].From = Vector2.new(pos1.X, pos1.Y)
@@ -930,14 +953,14 @@ local function getCurrentWeapon()
     if now - lastWeaponCheck < WEAPON_CHECK_INTERVAL and currentWeaponCache then
         return currentWeaponCache
     end
-    
+ 
     lastWeaponCheck = now
     local character = LocalPlayer.Character
-    if not character then 
+    if not character then
         currentWeaponCache = nil
-        return nil 
+        return nil
     end
-    
+ 
     local tool = character:FindFirstChildOfClass("Tool")
     currentWeaponCache = tool and tool.Name or nil
     return currentWeaponCache
@@ -945,15 +968,15 @@ end
 
 local function updateWeaponSettings()
     local weaponName = getCurrentWeapon()
-    if not weaponName then 
+    if not weaponName then
         Config.CurrentWeapon = nil
-        return 
+        return
     end
-    
+ 
     if Config.CurrentWeapon == weaponName then return end
-    
+ 
     local profile = Config.WeaponProfiles[weaponName] or Config.WeaponProfiles["Default"]
-    
+ 
     Config.CurrentWeapon = weaponName
     Config.CurrentPrediction = profile.Prediction
     Config.CurrentMaxDistance = profile.MaxDistance
@@ -963,14 +986,14 @@ local teamCheckCache = {}
 local function isOnSameTeam(player)
     if not Config.TeamCheck then return false end
     if not LocalPlayer.Team or not player.Team then return false end
-    
+ 
     local cacheKey = player.UserId
     local now = tick()
-    
+ 
     if teamCheckCache[cacheKey] and now - teamCheckCache[cacheKey].time < 2 then
         return teamCheckCache[cacheKey].result
     end
-    
+ 
     local result = LocalPlayer.Team == player.Team
     teamCheckCache[cacheKey] = {result = result, time = now}
     return result
@@ -979,23 +1002,23 @@ end
 local knockedCache = {}
 local function isKnocked(player)
     if not Config.KnockedCheck then return false end
-    
+ 
     local cacheKey = player.UserId
     local now = tick()
-    
+ 
     if knockedCache[cacheKey] and now - knockedCache[cacheKey].time < 0.5 then
         return knockedCache[cacheKey].result
     end
-    
+ 
     local character = player.Character
     if not character then return false end
-    
+ 
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if humanoid and humanoid.Health <= 0 then
         knockedCache[cacheKey] = {result = true, time = now}
         return true
     end
-    
+ 
     local bodyEffects = character:FindFirstChild("BodyEffects")
     local result = false
     if bodyEffects then
@@ -1004,7 +1027,7 @@ local function isKnocked(player)
             result = true
         end
     end
-    
+ 
     knockedCache[cacheKey] = {result = result, time = now}
     return result
 end
@@ -1012,39 +1035,39 @@ end
 local wallCheckCache = {}
 local function hasWallBetween(origin, targetPart)
     if not Config.WallCheck then return false end
-    
+ 
     local cacheKey = tostring(targetPart)
     local now = tick()
-    
+ 
     if wallCheckCache[cacheKey] and now - wallCheckCache[cacheKey].time < 0.2 then
         return wallCheckCache[cacheKey].result
     end
-    
+ 
     local rayParams = RaycastParams.new()
     rayParams.FilterDescendantsInstances = {LocalPlayer.Character, targetPart.Parent}
     rayParams.FilterType = Enum.RaycastFilterType.Exclude
     rayParams.IgnoreWater = true
-    
+ 
     local direction = (targetPart.Position - origin)
     local rayResult = workspace:Raycast(origin, direction, rayParams)
-    
+ 
     local result = false
     if rayResult and rayResult.Instance then
         if not rayResult.Instance:IsDescendantOf(targetPart.Parent) then
             result = true
         end
     end
-    
+ 
     wallCheckCache[cacheKey] = {result = result, time = now}
     return result
 end
 
 local function isVisible(part)
     if not Config.VisibleCheck then return true end
-    
+ 
     local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
     if not onScreen then return false end
-    
+ 
     return not hasWallBetween(Camera.CFrame.Position, part)
 end
 
@@ -1052,22 +1075,22 @@ local function resolveVelocity(part)
     if not Config.Resolver then
         return part.Velocity
     end
-    
+ 
     local velocity = part.Velocity
     local magnitude = velocity.Magnitude
-    
+ 
     if magnitude < 5 then
         return Vector3.new(0, 0, 0)
     end
-    
+ 
     if velocity.Y > 10 or velocity.Y < -10 then
         velocity = Vector3.new(velocity.X, velocity.Y * 0.7, velocity.Z)
     end
-    
+ 
     if magnitude > 80 then
         velocity = velocity * 0.5
     end
-    
+ 
     return velocity
 end
 
@@ -1075,11 +1098,11 @@ local function getClosestPointOnPart(part, mousePos)
     if not Config.Multipoint then
         return part.Position
     end
-    
+ 
     local size = part.Size
     local cf = part.CFrame
     local multipointSize = Config.MultipointSize / 10
-    
+ 
     local points = {
         part.Position,
         (cf * CFrame.new(size.X * multipointSize, 0, 0)).Position,
@@ -1092,10 +1115,10 @@ local function getClosestPointOnPart(part, mousePos)
         (cf * CFrame.new(-size.X * multipointSize, size.Y * multipointSize, 0)).Position,
         (cf * CFrame.new(size.X * multipointSize, -size.Y * multipointSize, 0)).Position,
     }
-    
+ 
     local closestPoint = part.Position
     local closestDist = math.huge
-    
+ 
     for _, point in ipairs(points) do
         local screenPos, onScreen = Camera:WorldToViewportPoint(point)
         if onScreen then
@@ -1106,13 +1129,13 @@ local function getClosestPointOnPart(part, mousePos)
             end
         end
     end
-    
+ 
     return closestPoint
 end
 
 local function getClosestPart(character)
     if not character then return nil, nil end
-    
+ 
     if Config.HitPart ~= "Closest Point" then
         local part = character:FindFirstChild(Config.HitPart)
         if part and part:IsA("BasePart") then
@@ -1120,19 +1143,19 @@ local function getClosestPart(character)
             return part, hitPoint
         end
     end
-    
+ 
     local bestPart, bestPoint, bestDist = nil, nil, math.huge
-    
+ 
     for _, partName in ipairs(allBodyParts) do
         local part = character:FindFirstChild(partName)
         if part and part:IsA("BasePart") then
             local hitPoint = getClosestPointOnPart(part, mouseLocation)
             local screenPos, onScreen = Camera:WorldToViewportPoint(hitPoint)
-            
+ 
             if onScreen then
                 local partPos = Vector2.new(screenPos.X, screenPos.Y)
                 local dist = (mouseLocation - partPos).Magnitude
-                
+ 
                 if dist < bestDist then
                     bestPart = part
                     bestPoint = hitPoint
@@ -1141,7 +1164,7 @@ local function getClosestPart(character)
             end
         end
     end
-    
+ 
     return bestPart, bestPoint
 end
 
@@ -1149,15 +1172,15 @@ local function updatePlayerCache()
     local now = tick()
     if now - lastCacheUpdate < CACHE_UPDATE_INTERVAL then return end
     lastCacheUpdate = now
-    
+ 
     playerCache = {}
     local myPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not myPos then return end
-    
+ 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
             local distance = (myPos.Position - player.Character.HumanoidRootPart.Position).Magnitude
-            
+ 
             if distance <= Config.CurrentMaxDistance * 1.3 then
                 table.insert(playerCache, {
                     player = player,
@@ -1166,46 +1189,46 @@ local function updatePlayerCache()
             end
         end
     end
-    
+ 
     table.sort(playerCache, function(a, b) return a.distance < b.distance end)
 end
 
 local function updateTarget()
     updateWeaponSettings()
     updatePlayerCache()
-    
-    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then 
+ 
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
         cachedTarget = nil
         cachedTargetPoint = nil
-        return 
+        return
     end
-    
+ 
     local fovRadius = Config.FOVSize
     local bestPart, bestPoint, bestDist = nil, nil, math.huge
-    
+ 
     local playersToCheck = math.min(#playerCache, Config.MaxPlayersToCheck)
-    
+ 
     for i = 1, playersToCheck do
         local data = playerCache[i]
         local player = data.player
-        
+ 
         if Config.TeamCheck and isOnSameTeam(player) then continue end
         if Config.KnockedCheck and isKnocked(player) then continue end
-        
+ 
         local part, hitPoint = getClosestPart(player.Character)
-        
+ 
         if part and hitPoint then
             local screenPos, onScreen = Camera:WorldToViewportPoint(hitPoint)
             if not onScreen then continue end
-            
+ 
             local partPos = Vector2.new(screenPos.X, screenPos.Y)
             local distFromMouse = (mouseLocation - partPos).Magnitude
-            
+ 
             if distFromMouse <= fovRadius then
-                if Config.WallCheck and hasWallBetween(Camera.CFrame.Position, part) then 
-                    continue 
+                if Config.WallCheck and hasWallBetween(Camera.CFrame.Position, part) then
+                    continue
                 end
-                
+ 
                 if distFromMouse < bestDist then
                     bestPart = part
                     bestPoint = hitPoint
@@ -1214,7 +1237,7 @@ local function updateTarget()
             end
         end
     end
-    
+ 
     cachedTarget = bestPart
     cachedTargetPoint = bestPoint
 end
@@ -1228,14 +1251,14 @@ local UI_UPDATE_RATE = 3
 
 RunService.RenderStepped:Connect(function()
     mouseLocation = UserInputService:GetMouseLocation()
-    
+ 
     uiUpdateCounter = uiUpdateCounter + 1
-    
+ 
     if uiUpdateCounter % UI_UPDATE_RATE == 0 then
         FOVCircle.Position = mouseLocation
         FOVCircle.Radius = Config.FOVSize
         FOVCircle.Visible = Config.ShowFOV
-        
+ 
         if Config.Multipoint then
             MultipointCircle.Position = mouseLocation
             MultipointCircle.Radius = Config.MultipointSize
@@ -1243,12 +1266,12 @@ RunService.RenderStepped:Connect(function()
         else
             MultipointCircle.Visible = false
         end
-        
+ 
         if Config.ShowTargeting and cachedTarget and cachedTargetPoint and Config.Enabled then
             local velocity = resolveVelocity(cachedTarget)
             local predictedPos = applyPrediction(cachedTargetPoint, velocity, Config.CurrentPrediction.X)
             local screenPos, onScreen = Camera:WorldToViewportPoint(predictedPos)
-            
+ 
             if onScreen then
                 TargetIndicator.Position = Vector2.new(screenPos.X, screenPos.Y)
                 TargetIndicator.Visible = true
@@ -1261,7 +1284,7 @@ RunService.RenderStepped:Connect(function()
             TargetIndicator.Visible = false
         end
     end
-    
+ 
     updateESP()
 end)
 
@@ -1281,7 +1304,7 @@ mt.__index = newcclosure(function(obj, prop)
         if cachedTarget and cachedTargetPoint then
             local velocity = resolveVelocity(cachedTarget)
             local predictedPos = applyPrediction(cachedTargetPoint, velocity, Config.CurrentPrediction.X)
-            
+ 
             return prop == "Hit" and CFrame.new(predictedPos) or cachedTarget
         end
     end
@@ -1303,14 +1326,14 @@ local function setupRapidFire()
         rapidFireConnection:Disconnect()
         rapidFireConnection = nil
     end
-    
+ 
     if not Config.RapidFire then return end
-    
+ 
     rapidFireConnection = UserInputService.InputBegan:Connect(function(input, processed)
         if processed then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             local shooting = true
-            
+ 
             local connection
             connection = UserInputService.InputEnded:Connect(function(endInput)
                 if endInput.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -1318,7 +1341,7 @@ local function setupRapidFire()
                     connection:Disconnect()
                 end
             end)
-            
+ 
             while shooting and Config.RapidFire and Config.Enabled do
                 local currentTool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
                 if currentTool then
@@ -1481,17 +1504,17 @@ local function createSection(name, order)
     section.BorderSizePixel = 0
     section.LayoutOrder = order
     section.Parent = contentFrame
-    
+ 
     local sectionCorner = Instance.new("UICorner", section)
     sectionCorner.CornerRadius = UDim.new(0, 10)
-    
+ 
     local sectionGradient = Instance.new("UIGradient", section)
     sectionGradient.Color = ColorSequence.new{
         ColorSequenceKeypoint.new(0, Color3.fromRGB(50, 50, 80)),
         ColorSequenceKeypoint.new(1, Color3.fromRGB(30, 30, 45))
     }
     sectionGradient.Rotation = 90
-    
+ 
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(1, -20, 1, 0)
     label.Position = UDim2.new(0, 15, 0, 0)
@@ -1502,7 +1525,7 @@ local function createSection(name, order)
     label.BackgroundTransparency = 1
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = section
-    
+ 
     return section
 end
 
@@ -1513,15 +1536,15 @@ local function createToggle(name, order, defaultValue, callback)
     toggle.BorderSizePixel = 0
     toggle.LayoutOrder = order
     toggle.Parent = contentFrame
-    
+ 
     local toggleCorner = Instance.new("UICorner", toggle)
     toggleCorner.CornerRadius = UDim.new(0, 10)
-    
+ 
     local toggleStroke = Instance.new("UIStroke", toggle)
     toggleStroke.Color = Color3.fromRGB(50, 50, 70)
     toggleStroke.Thickness = 1
     toggleStroke.Transparency = 0.7
-    
+ 
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(1, -75, 1, 0)
     label.Position = UDim2.new(0, 15, 0, 0)
@@ -1532,7 +1555,7 @@ local function createToggle(name, order, defaultValue, callback)
     label.BackgroundTransparency = 1
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = toggle
-    
+ 
     local button = Instance.new("TextButton")
     button.Size = UDim2.new(0, 50, 0, 28)
     button.Position = UDim2.new(1, -60, 0.5, -14)
@@ -1543,44 +1566,44 @@ local function createToggle(name, order, defaultValue, callback)
     button.Font = Enum.Font.GothamBold
     button.BorderSizePixel = 0
     button.Parent = toggle
-    
+ 
     local buttonCorner = Instance.new("UICorner", button)
     buttonCorner.CornerRadius = UDim.new(0, 8)
-    
+ 
     local buttonStroke = Instance.new("UIStroke", button)
     buttonStroke.Color = defaultValue and Color3.fromRGB(100, 255, 150) or Color3.fromRGB(80, 80, 100)
     buttonStroke.Thickness = 1.5
-    
+ 
     local enabled = defaultValue
     button.MouseButton1Click:Connect(function()
         enabled = not enabled
         button.Text = enabled and "ON" or "OFF"
-        
+ 
         TweenService:Create(button, TweenInfo.new(0.2), {
             BackgroundColor3 = enabled and Color3.fromRGB(80, 200, 120) or Color3.fromRGB(60, 60, 80)
         }):Play()
-        
+ 
         TweenService:Create(buttonStroke, TweenInfo.new(0.2), {
             Color = enabled and Color3.fromRGB(100, 255, 150) or Color3.fromRGB(80, 80, 100)
         }):Play()
-        
+ 
         callback(enabled)
     end)
-    
+ 
     button.MouseEnter:Connect(function()
         TweenService:Create(toggleStroke, TweenInfo.new(0.2), {
             Color = Color3.fromRGB(100, 100, 150),
             Transparency = 0.3
         }):Play()
     end)
-    
+ 
     button.MouseLeave:Connect(function()
         TweenService:Create(toggleStroke, TweenInfo.new(0.2), {
             Color = Color3.fromRGB(50, 50, 70),
             Transparency = 0.7
         }):Play()
     end)
-    
+ 
     return toggle
 end
 
@@ -1591,15 +1614,15 @@ local function createSlider(name, order, min, max, defaultValue, callback, isDec
     sliderFrame.BorderSizePixel = 0
     sliderFrame.LayoutOrder = order
     sliderFrame.Parent = contentFrame
-    
+ 
     local sliderCorner = Instance.new("UICorner", sliderFrame)
     sliderCorner.CornerRadius = UDim.new(0, 10)
-    
+ 
     local sliderStroke = Instance.new("UIStroke", sliderFrame)
     sliderStroke.Color = Color3.fromRGB(50, 50, 70)
     sliderStroke.Thickness = 1
     sliderStroke.Transparency = 0.7
-    
+ 
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(1, -90, 0, 25)
     label.Position = UDim2.new(0, 15, 0, 8)
@@ -1610,7 +1633,7 @@ local function createSlider(name, order, min, max, defaultValue, callback, isDec
     label.BackgroundTransparency = 1
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = sliderFrame
-    
+ 
     local valueLabel = Instance.new("TextLabel")
     valueLabel.Size = UDim2.new(0, 70, 0, 25)
     valueLabel.Position = UDim2.new(1, -80, 0, 8)
@@ -1621,63 +1644,63 @@ local function createSlider(name, order, min, max, defaultValue, callback, isDec
     valueLabel.BackgroundTransparency = 1
     valueLabel.TextXAlignment = Enum.TextXAlignment.Right
     valueLabel.Parent = sliderFrame
-    
+ 
     local sliderBg = Instance.new("Frame")
     sliderBg.Size = UDim2.new(1, -30, 0, 8)
     sliderBg.Position = UDim2.new(0, 15, 0, 45)
     sliderBg.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
     sliderBg.BorderSizePixel = 0
     sliderBg.Parent = sliderFrame
-    
+ 
     local sliderBgCorner = Instance.new("UICorner", sliderBg)
     sliderBgCorner.CornerRadius = UDim.new(0, 4)
-    
+ 
     local sliderFill = Instance.new("Frame")
     sliderFill.Size = UDim2.new((defaultValue - min) / (max - min), 0, 1, 0)
     sliderFill.BackgroundColor3 = Color3.fromRGB(100, 150, 255)
     sliderFill.BorderSizePixel = 0
     sliderFill.Parent = sliderBg
-    
+ 
     local sliderFillCorner = Instance.new("UICorner", sliderFill)
     sliderFillCorner.CornerRadius = UDim.new(0, 4)
-    
+ 
     local sliderGradient = Instance.new("UIGradient", sliderFill)
     sliderGradient.Color = ColorSequence.new{
         ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 80, 200)),
         ColorSequenceKeypoint.new(1, Color3.fromRGB(80, 150, 255))
     }
-    
+ 
     local dragging = false
     sliderBg.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
         end
     end)
-    
+ 
     UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = false
         end
     end)
-    
+ 
     UserInputService.InputChanged:Connect(function(input)
         if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             local relX = math.clamp((input.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
-            
+ 
             TweenService:Create(sliderFill, TweenInfo.new(0.1), {
                 Size = UDim2.new(relX, 0, 1, 0)
             }):Play()
-            
+ 
             local value = min + (max - min) * relX
             if not isDecimal then
                 value = math.floor(value)
             end
-            
+ 
             valueLabel.Text = isDecimal and string.format("%.2f", value) or tostring(value)
             callback(value)
         end
     end)
-    
+ 
     return sliderFrame
 end
 
@@ -1689,15 +1712,15 @@ local function createDropdown(name, order, options, defaultValue, callback)
     dropdownFrame.LayoutOrder = order
     dropdownFrame.ClipsDescendants = false
     dropdownFrame.Parent = contentFrame
-    
+ 
     local dropdownCorner = Instance.new("UICorner", dropdownFrame)
     dropdownCorner.CornerRadius = UDim.new(0, 10)
-    
+ 
     local dropdownStroke = Instance.new("UIStroke", dropdownFrame)
     dropdownStroke.Color = Color3.fromRGB(50, 50, 70)
     dropdownStroke.Thickness = 1
     dropdownStroke.Transparency = 0.7
-    
+ 
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(0, 140, 1, 0)
     label.Position = UDim2.new(0, 15, 0, 0)
@@ -1708,7 +1731,7 @@ local function createDropdown(name, order, options, defaultValue, callback)
     label.BackgroundTransparency = 1
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = dropdownFrame
-    
+ 
     local button = Instance.new("TextButton")
     button.Size = UDim2.new(1, -170, 0, 30)
     button.Position = UDim2.new(0, 155, 0.5, -15)
@@ -1721,10 +1744,10 @@ local function createDropdown(name, order, options, defaultValue, callback)
     button.ClipsDescendants = false
     button.ZIndex = 2
     button.Parent = dropdownFrame
-    
+ 
     local buttonCorner = Instance.new("UICorner", button)
     buttonCorner.CornerRadius = UDim.new(0, 8)
-    
+ 
     local dropdown = Instance.new("Frame")
     dropdown.Size = UDim2.new(1, 0, 0, #options * 35)
     dropdown.Position = UDim2.new(0, 0, 1, 3)
@@ -1733,14 +1756,14 @@ local function createDropdown(name, order, options, defaultValue, callback)
     dropdown.Visible = false
     dropdown.ZIndex = 10
     dropdown.Parent = button
-    
+ 
     local dropdownCorner2 = Instance.new("UICorner", dropdown)
     dropdownCorner2.CornerRadius = UDim.new(0, 8)
-    
+ 
     local dropdownStroke2 = Instance.new("UIStroke", dropdown)
     dropdownStroke2.Color = Color3.fromRGB(80, 80, 120)
     dropdownStroke2.Thickness = 2
-    
+ 
     for i, option in ipairs(options) do
         local optBtn = Instance.new("TextButton")
         optBtn.Size = UDim2.new(1, -8, 0, 32)
@@ -1753,33 +1776,33 @@ local function createDropdown(name, order, options, defaultValue, callback)
         optBtn.BorderSizePixel = 0
         optBtn.ZIndex = 11
         optBtn.Parent = dropdown
-        
+ 
         local optCorner = Instance.new("UICorner", optBtn)
         optCorner.CornerRadius = UDim.new(0, 6)
-        
+ 
         optBtn.MouseButton1Click:Connect(function()
             button.Text = option
             dropdown.Visible = false
             callback(option)
         end)
-        
+ 
         optBtn.MouseEnter:Connect(function()
             TweenService:Create(optBtn, TweenInfo.new(0.15), {
                 BackgroundColor3 = Color3.fromRGB(100, 100, 180)
             }):Play()
         end)
-        
+ 
         optBtn.MouseLeave:Connect(function()
             TweenService:Create(optBtn, TweenInfo.new(0.15), {
                 BackgroundColor3 = Color3.fromRGB(35, 35, 50)
             }):Play()
         end)
     end
-    
+ 
     button.MouseButton1Click:Connect(function()
         dropdown.Visible = not dropdown.Visible
     end)
-    
+ 
     return dropdownFrame
 end
 
@@ -1790,15 +1813,15 @@ local function createColorPicker(name, order, defaultColor, callback)
     colorFrame.BorderSizePixel = 0
     colorFrame.LayoutOrder = order
     colorFrame.Parent = contentFrame
-    
+ 
     local colorCorner = Instance.new("UICorner", colorFrame)
     colorCorner.CornerRadius = UDim.new(0, 10)
-    
+ 
     local colorStroke = Instance.new("UIStroke", colorFrame)
     colorStroke.Color = Color3.fromRGB(50, 50, 70)
     colorStroke.Thickness = 1
     colorStroke.Transparency = 0.7
-    
+ 
     local label = Instance.new("TextLabel")
     label.Size = UDim2.new(1, -70, 1, 0)
     label.Position = UDim2.new(0, 15, 0, 0)
@@ -1809,7 +1832,7 @@ local function createColorPicker(name, order, defaultColor, callback)
     label.BackgroundTransparency = 1
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = colorFrame
-    
+ 
     local colorDisplay = Instance.new("TextButton")
     colorDisplay.Size = UDim2.new(0, 50, 0, 28)
     colorDisplay.Position = UDim2.new(1, -60, 0.5, -14)
@@ -1817,14 +1840,14 @@ local function createColorPicker(name, order, defaultColor, callback)
     colorDisplay.Text = ""
     colorDisplay.BorderSizePixel = 0
     colorDisplay.Parent = colorFrame
-    
+ 
     local displayCorner = Instance.new("UICorner", colorDisplay)
     displayCorner.CornerRadius = UDim.new(0, 8)
-    
+ 
     local displayStroke = Instance.new("UIStroke", colorDisplay)
     displayStroke.Color = Color3.fromRGB(100, 100, 150)
     displayStroke.Thickness = 2
-    
+ 
     local colors = {
         Color3.fromRGB(255, 255, 255),
         Color3.fromRGB(255, 0, 0),
@@ -1834,19 +1857,19 @@ local function createColorPicker(name, order, defaultColor, callback)
         Color3.fromRGB(255, 0, 255),
         Color3.fromRGB(0, 255, 255)
     }
-    
+ 
     local colorIndex = 1
     colorDisplay.MouseButton1Click:Connect(function()
         colorIndex = colorIndex % #colors + 1
         local newColor = colors[colorIndex]
-        
+ 
         TweenService:Create(colorDisplay, TweenInfo.new(0.2), {
             BackgroundColor3 = newColor
         }):Play()
-        
+ 
         callback(newColor)
     end)
-    
+ 
     return colorFrame
 end
 
@@ -2126,28 +2149,28 @@ local fpsDisplay = 60
 RunService.Heartbeat:Connect(function(deltaTime)
     fpsCounter = fpsCounter + 1
     local now = tick()
-    
+ 
     if now - lastStatusUpdate >= 1 then
         fpsDisplay = math.floor(fpsCounter / (now - lastStatusUpdate))
         fpsCounter = 0
         lastStatusUpdate = now
-        
+ 
         local weapon = getCurrentWeapon()
         if weapon then
             weaponLabel.Text = "Current Weapon: " .. weapon
         else
             weaponLabel.Text = "Current Weapon: None"
         end
-        
+ 
         hitPartLabel.Text = "Hit Part: " .. Config.HitPart
         fovLabel.Text = "FOV: " .. Config.FOVSize
         multipointLabel.Text = "Multipoint Size: " .. Config.MultipointSize
-        
+ 
         fpsLabel.Text = "FPS: " .. fpsDisplay
         fpsLabel.TextColor3 = fpsDisplay >= 50 and Color3.fromRGB(100, 255, 100) or
                                fpsDisplay >= 30 and Color3.fromRGB(255, 200, 100) or
                                Color3.fromRGB(255, 100, 100)
-        
+ 
         if cachedTarget then
             targetLabel.Text = "Target: Locked"
             targetLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
