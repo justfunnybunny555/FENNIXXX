@@ -142,48 +142,6 @@ local function createAuthGUI()
     titleLabel.BackgroundTransparency = 1
     titleLabel.Parent = authFrame
 
-    -- -- Простая версия
-local KeyAuthConfig = {
-    AppName = "YourAppName",
-    OwnerID = "YourOwnerID",
-    Secret = "YourSecret"
-}
-
-local function GetHWID()
-    return game:GetService("RbxAnalyticsService"):GetClientId()
-end
-
-local function CheckKey(key)
-    local url = "https://keyauth.win/api/1.2/"
-    local hwid = GetHWID()
-    
-    local data = string.format(
-        '{"type":"license","key":"%s","hwid":"%s","name":"%s","ownerid":"%s"}',
-        key, hwid, KeyAuthConfig.AppName, KeyAuthConfig.OwnerID
-    )
-    
-    local response = request({
-        Url = url,
-        Method = "POST",
-        Headers = {["Content-Type"] = "application/json"},
-        Body = data
-    })
-    
-    local result = game:GetService("HttpService"):JSONDecode(response.Body)
-    return result.success
-end
-
--- Использование
-local licenseKey = "ВВЕДИТЕ_КЛЮЧ_ЗДЕСЬ"
-
-if CheckKey(licenseKey) then
-    print("Лицензия действительна!")
-    -- Ваш код здесь
-else
-    print("Неверная лицензия!")
-    return
-end)
-
     -- Подзаголовок
     local subtitleLabel = Instance.new("TextLabel")
     subtitleLabel.Size = UDim2.new(1, 0, 0, 30)
