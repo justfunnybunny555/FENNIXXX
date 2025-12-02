@@ -1,4 +1,4 @@
--- Roblox Services
+-- Roblox services
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
@@ -6,352 +6,315 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local CoreGui = game:GetService("CoreGui")
-local HttpService = game:GetService("HttpService")
 
--- KeyAuth Configuration
-local KeyAuthApp = "FENNIXXX"
-local KeyAuthOwnerID = "edcEgR58Gp"
-local KeyAuthVersion = "1.0"
+-- Aimbot Configuration
+local Config = {
+    Enabled = true,
+    HitPart = "Closest Point",
+    FOVSize = 35, -- Used for target selection radius, but FOV circle is invisible
+    Prediction = {
+        X = 0,
+        Y = 0,
+        Z = 0
+    },
+    Keybind = Enum.KeyCode.C
+}
 
--- Переменная для проверки авторизации
-local isAuthorized = false
+-- Spread Controller Configuration
+local SpreadMod = { 
+    BulletSpread = { 
+        Enabled = true, 
+        Amount = 60 
+    } 
+}
 
--- Создание GUI для ввода ключа
-local function createAuthGUI()
-    local authGui = Instance.new("ScreenGui")
-    authGui.Name = "KeyAuthGUI"
-    authGui.IgnoreGuiInset = true
-    authGui.ResetOnSpawn = false
-    authGui.Parent = CoreGui
+-- Configuration for fire rate
+local Delay = 0.1
 
-    -- Затемненный фон
-    local darkBackground = Instance.new("Frame")
-    darkBackground.Size = UDim2.new(1, 0, 1, 0)
-    darkBackground.Position = UDim2.new(0, 0, 0, 0)
-    darkBackground.BackgroundColor3 = Color3.fromRGB(5, 5, 10)
-    darkBackground.BorderSizePixel = 0
-    darkBackground.BackgroundTransparency = 0.1
-    darkBackground.Parent = authGui
+-- List of allowed parts for aimbot targeting (excluding hands and feet)
+local allowedPartsList = {
+    "Head", "UpperTorso", "LowerTorso", "HumanoidRootPart"
+}
 
-    -- Градиент для фона
-    local bgGradient = Instance.new("UIGradient", darkBackground)
-    bgGradient.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(10, 10, 20)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(5, 5, 15)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 20))
-    }
-    bgGradient.Rotation = 45
+-- Create FOV Circle for aimbot (invisible)
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Visible = false -- FOV circle is not visible
 
-    -- Создание снежинок
-    local snowflakes = {}
-    for i = 1, 50 do
-        local snowflake = Instance.new("Frame")
-        snowflake.Size = UDim2.new(0, math.random(2, 6), 0, math.random(2, 6))
-        snowflake.Position = UDim2.new(math.random(0, 100) / 100, 0, math.random(-50, 0) / 100, 0)
-        snowflake.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        snowflake.BackgroundTransparency = math.random(30, 70) / 100
-        snowflake.BorderSizePixel = 0
-        snowflake.Parent = darkBackground
-        
-        local snowCorner = Instance.new("UICorner", snowflake)
-        snowCorner.CornerRadius = UDim.new(1, 0)
-        
-        table.insert(snowflakes, {
-            frame = snowflake,
-            speed = math.random(20, 50) / 1000,
-            drift = math.random(-10, 10) / 1000
-        })
-    end
+-- Cache for the current aimbot target
+local cachedTarget = nil
 
-    -- Анимация снежинок
-    local snowConnection
-    snowConnection = RunService.RenderStepped:Connect(function()
-        for _, snow in ipairs(snowflakes) do
-            local currentPos = snow.frame.Position
-            local newY = currentPos.Y.Scale + snow.speed
-            local newX = currentPos.X.Scale + snow.drift
-            
-            if newY > 1.2 then
-                newY = -0.1
-                newX = math.random(0, 100) / 100
+-- Function to get the closest part of a player's character for aimbot
+local function getClosestPart(character)
+    local bestPart, bestDist = nil, math.huge
+    local mousePos = UserInputService:GetMouseLocation()
+
+    for _, partName in ipairs(allowedPartsList) do
+        local part = character:FindFirstChild(partName)
+        if part then
+            local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+            if onScreen then
+                local partPos = Vector2.new(screenPos.X, screenPos.Y)
+                local dist = (mousePos - partPos).Magnitude
+                if dist < bestDist then
+                    bestPart, bestDist = part, dist
+                end
             end
-            
-            if newX > 1.1 then newX = -0.1 end
-            if newX < -0.1 then newX = 1.1 end
-            
-            snow.frame.Position = UDim2.new(newX, 0, newY, 0)
-        end
-    end)
-
-    -- Основной фрейм авторизации
-    local authFrame = Instance.new("Frame")
-    authFrame.Size = UDim2.new(0, 450, 0, 320)
-    authFrame.Position = UDim2.new(0.5, -225, 0.5, -160)
-    authFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
-    authFrame.BorderSizePixel = 0
-    authFrame.BackgroundTransparency = 0.05
-    authFrame.Parent = authGui
-
-    local authCorner = Instance.new("UICorner", authFrame)
-    authCorner.CornerRadius = UDim.new(0, 20)
-
-    -- Неоновая обводка
-    local authStroke = Instance.new("UIStroke", authFrame)
-    authStroke.Color = Color3.fromRGB(100, 150, 255)
-    authStroke.Thickness = 3
-    authStroke.Transparency = 0.3
-
-    -- Анимация свечения обводки
-    local glowTween = TweenService:Create(authStroke, TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
-        Color = Color3.fromRGB(150, 100, 255)
-    })
-    glowTween:Play()
-
-    -- Градиент фрейма
-    local authGradient = Instance.new("UIGradient", authFrame)
-    authGradient.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 25, 40)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(15, 15, 25)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 35))
-    }
-    authGradient.Rotation = 90
-
-    -- Иконка замка
-    local lockIcon = Instance.new("TextLabel")
-    lockIcon.Size = UDim2.new(0, 60, 0, 60)
-    lockIcon.Position = UDim2.new(0.5, -30, 0, 25)
-    lockIcon.Text = "🔐"
-    lockIcon.TextSize = 48
-    lockIcon.BackgroundTransparency = 1
-    lockIcon.Parent = authFrame
-
-    -- Анимация иконки
-    local iconTween = TweenService:Create(lockIcon, TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
-        Rotation = 10
-    })
-    iconTween:Play()
-
-    -- Заголовок
-    local titleLabel = Instance.new("TextLabel")
-    titleLabel.Size = UDim2.new(1, 0, 0, 50)
-    titleLabel.Position = UDim2.new(0, 0, 0, 90)
-    titleLabel.Text = "SILENT AIM AUTHENTICATION"
-    titleLabel.TextColor3 = Color3.fromRGB(200, 220, 255)
-    titleLabel.TextSize = 20
-    titleLabel.Font = Enum.Font.GothamBold
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.Parent = authFrame
-
-    -- Подзаголовок
-    local subtitleLabel = Instance.new("TextLabel")
-    subtitleLabel.Size = UDim2.new(1, 0, 0, 30)
-    subtitleLabel.Position = UDim2.new(0, 0, 0, 135)
-    subtitleLabel.Text = "Enter your premium license key"
-    subtitleLabel.TextColor3 = Color3.fromRGB(150, 170, 200)
-    subtitleLabel.TextSize = 13
-    subtitleLabel.Font = Enum.Font.Gotham
-    subtitleLabel.BackgroundTransparency = 1
-    subtitleLabel.Parent = authFrame
-
-    -- Поле ввода ключа
-    local keyBox = Instance.new("TextBox")
-    keyBox.Size = UDim2.new(0, 380, 0, 50)
-    keyBox.Position = UDim2.new(0.5, -190, 0, 175)
-    keyBox.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
-    keyBox.Text = ""
-    keyBox.PlaceholderText = "KEYAUTH-XXXXX-XXXXX-XXXXX"
-    keyBox.PlaceholderColor3 = Color3.fromRGB(80, 80, 100)
-    keyBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-    keyBox.TextSize = 15
-    keyBox.Font = Enum.Font.GothamBold
-    keyBox.BorderSizePixel = 0
-    keyBox.ClearTextOnFocus = false
-    keyBox.Parent = authFrame
-
-    local keyBoxCorner = Instance.new("UICorner", keyBox)
-    keyBoxCorner.CornerRadius = UDim.new(0, 12)
-
-    local keyBoxStroke = Instance.new("UIStroke", keyBox)
-    keyBoxStroke.Color = Color3.fromRGB(60, 80, 150)
-    keyBoxStroke.Thickness = 2
-    keyBoxStroke.Transparency = 0.5
-
-    -- Анимация при фокусе
-    keyBox.Focused:Connect(function()
-        TweenService:Create(keyBoxStroke, TweenInfo.new(0.3), {
-            Color = Color3.fromRGB(100, 150, 255),
-            Transparency = 0
-        }):Play()
-    end)
-
-    keyBox.FocusLost:Connect(function()
-        TweenService:Create(keyBoxStroke, TweenInfo.new(0.3), {
-            Color = Color3.fromRGB(60, 80, 150),
-            Transparency = 0.5
-        }):Play()
-    end)
-
-    -- Кнопка подтверждения
-    local submitBtn = Instance.new("TextButton")
-    submitBtn.Size = UDim2.new(0, 180, 0, 45)
-    submitBtn.Position = UDim2.new(0.5, -90, 0, 245)
-    submitBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 255)
-    submitBtn.Text = "VERIFY KEY"
-    submitBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    submitBtn.TextSize = 16
-    submitBtn.Font = Enum.Font.GothamBold
-    submitBtn.BorderSizePixel = 0
-    submitBtn.Parent = authFrame
-
-    local submitBtnCorner = Instance.new("UICorner", submitBtn)
-    submitBtnCorner.CornerRadius = UDim.new(0, 12)
-
-    local submitBtnStroke = Instance.new("UIStroke", submitBtn)
-    submitBtnStroke.Color = Color3.fromRGB(150, 180, 255)
-    submitBtnStroke.Thickness = 2
-
-    local submitGradient = Instance.new("UIGradient", submitBtn)
-    submitGradient.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(100, 140, 255)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(80, 120, 255))
-    }
-    submitGradient.Rotation = 90
-
-    -- Статус
-    local statusLabel = Instance.new("TextLabel")
-    statusLabel.Size = UDim2.new(1, 0, 0, 20)
-    statusLabel.Position = UDim2.new(0, 0, 1, -25)
-    statusLabel.Text = ""
-    statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-    statusLabel.TextSize = 12
-    statusLabel.Font = Enum.Font.GothamBold
-    statusLabel.BackgroundTransparency = 1
-    statusLabel.Parent = authFrame
-
-    -- Функция проверки ключа
-    local function verifyKey()
-        local key = keyBox.Text
-        
-        if key == "" or #key < 10 then
-            statusLabel.Text = "❌ Please enter a valid key"
-            statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-            
-            -- Тряска при ошибке
-            local originalPos = authFrame.Position
-            for i = 1, 3 do
-                TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos + UDim2.new(0, 10, 0, 0)}):Play()
-                wait(0.05)
-                TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos - UDim2.new(0, 10, 0, 0)}):Play()
-                wait(0.05)
-            end
-            authFrame.Position = originalPos
-            return
-        end
-
-        submitBtn.Text = "VERIFYING..."
-        submitBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 120)
-        statusLabel.Text = "⏳ Checking license..."
-        statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
-
-        task.wait(1.5)
-        
-        -- Проверяем формат ключа
-        if string.match(key, "KEYAUTH%-[%w]+%-[%w]+%-[%w]+") or key == "test" then
-            isAuthorized = true
-            statusLabel.Text = "✅ License verified successfully!"
-            statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-            
-            -- Анимация успеха
-            lockIcon.Text = "✓"
-            TweenService:Create(lockIcon, TweenInfo.new(0.5), {
-                TextColor3 = Color3.fromRGB(100, 255, 100),
-                TextSize = 60
-            }):Play()
-            
-            TweenService:Create(submitBtn, TweenInfo.new(0.5), {
-                BackgroundColor3 = Color3.fromRGB(100, 255, 100)
-            }):Play()
-            
-            task.wait(1)
-            
-            -- Плавное исчезновение
-            snowConnection:Disconnect()
-            
-            TweenService:Create(authFrame, TweenInfo.new(0.8, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-                Size = UDim2.new(0, 0, 0, 0),
-                Position = UDim2.new(0.5, 0, 0.5, 0),
-                BackgroundTransparency = 1
-            }):Play()
-            
-            TweenService:Create(darkBackground, TweenInfo.new(0.8), {
-                BackgroundTransparency = 1
-            }):Play()
-            
-            for _, snow in ipairs(snowflakes) do
-                TweenService:Create(snow.frame, TweenInfo.new(0.8), {
-                    BackgroundTransparency = 1
-                }):Play()
-            end
-            
-            task.wait(0.8)
-            authGui:Destroy()
-            initializeScript()
-        else
-            submitBtn.Text = "VERIFY KEY"
-            submitBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 255)
-            statusLabel.Text = "❌ Invalid license key"
-            statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-            
-            -- Тряска при ошибке
-            local originalPos = authFrame.Position
-            for i = 1, 3 do
-                TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos + UDim2.new(0, 10, 0, 0)}):Play()
-                wait(0.05)
-                TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos - UDim2.new(0, 10, 0, 0)}):Play()
-                wait(0.05)
-            end
-            authFrame.Position = originalPos
         end
     end
-
-    submitBtn.MouseButton1Click:Connect(verifyKey)
-    
-    keyBox.FocusLost:Connect(function(enterPressed)
-        if enterPressed then
-            verifyKey()
-        end
-    end)
-
-    submitBtn.MouseEnter:Connect(function()
-        TweenService:Create(submitBtn, TweenInfo.new(0.2), {
-            Size = UDim2.new(0, 190, 0, 48),
-            BackgroundColor3 = Color3.fromRGB(100, 140, 255)
-        }):Play()
-    end)
-
-    submitBtn.MouseLeave:Connect(function()
-        if submitBtn.Text == "VERIFY KEY" then
-            TweenService:Create(submitBtn, TweenInfo.new(0.2), {
-                Size = UDim2.new(0, 180, 0, 45),
-                BackgroundColor3 = Color3.fromRGB(80, 120, 255)
-            }):Play()
-        end
-    end)
-
-    -- Анимация появления
-    authFrame.Size = UDim2.new(0, 0, 0, 0)
-    authFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-    authFrame.BackgroundTransparency = 1
-    
-    TweenService:Create(authFrame, TweenInfo.new(0.8, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.new(0, 450, 0, 320),
-        Position = UDim2.new(0.5, -225, 0.5, -160),
-        BackgroundTransparency = 0.05
-    }):Play()
+    return bestPart
 end
 
--- Основная функция инициализации скрипта
-function initializeScript()
-    if not isAuthorized then
-        return
+-- Function to update aimbot target selection
+local function updateTarget()
+    local mousePos = UserInputService:GetMouseLocation()
+    local radius = Config.FOVSize * 5
+
+    local bestPart, bestDist = nil, math.huge
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local part = Config.HitPart == "Closest Point" and getClosestPart(player.Character) or player.Character:FindFirstChild("Head")
+            if part then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                if onScreen then
+                    local partPos = Vector2.new(screenPos.X, screenPos.Y)
+                    local dist = (mousePos - partPos).Magnitude
+                    if dist < bestDist and dist <= radius then
+                        bestPart, bestDist = part, dist
+                    end
+                end
+            end
+        end
     end
+    cachedTarget = bestPart
+end
+
+-- Function to apply prediction offset for aimbot
+local function applyPrediction(cf, offset)
+    return cf * CFrame.new(offset.X, offset.Y, offset.Z)
+end
+
+-- Toggle aimbot with keybind
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == Config.Keybind then
+        Config.Enabled = not Config.Enabled
+        print("Silent Aimbot is now", Config.Enabled and "Enabled" or "Disabled")
+    end
+end)
+
+-- Hook mouse behavior for aimbot
+local mt = getrawmetatable(game)
+local oldIndex = mt.__index
+setreadonly(mt, false)
+mt.__index = newcclosure(function(obj, prop)
+    if Config.Enabled and obj:IsA("Mouse") and (prop == "Hit" or prop == "Target") then
+        local target = cachedTarget
+        if target then
+            local predMultiplier = Vector3.new(Config.Prediction.X, Config.Prediction.Y, Config.Prediction.Z)
+            local offset = target.Velocity * predMultiplier
+            return prop == "Hit" and applyPrediction(target.CFrame, offset) or target
+        end
+    end
+    return oldIndex(obj, prop)
+end)
+setreadonly(mt, true)
+
+-- Update aimbot target every few frames
+local frameCounter = 0
+RunService.RenderStepped:Connect(function()
+    if not Config.Enabled then return end
+    frameCounter = frameCounter + 1
+    if frameCounter % 3 == 0 then -- Update every 3 frames
+        updateTarget()
+    end
+end)
+
+-- Automatically activate tool when a valid aimbot target is found
+RunService.Heartbeat:Connect(function()
+    if not Config.Enabled then return end
+    local target = cachedTarget
+    local currentTool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+    if target and currentTool and currentTool:FindFirstChild("Activate") then
+        currentTool:Activate()
+    end
+end)
+
+-- Hook math.random for bullet spread modification
+local oldRandom
+oldRandom = hookfunction(math.random, function(...)
+    local args = {...}
+    if checkcaller() then return oldRandom(...) end -- Bypass for Roblox internal calls
+    if (#args == 0) or (args[1] == -0.05 and args[2] == 0.05) or (args[1] == -0.1) or (args[1] == -0.05) then
+        if SpreadMod.BulletSpread.Enabled then
+            return oldRandom(...) * (SpreadMod.BulletSpread.Amount / 100)
+        end
+    end
+    return oldRandom(...)
+end)
+
+-- Create main ScreenGui for spread controller
+local gui = Instance.new("ScreenGui")
+gui.IgnoreGuiInset = true
+gui.ResetOnSpawn = false
+gui.Name = "SpreadUI"
+gui.Parent = CoreGui
+
+-- Main UI setup for spread controller
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 320, 0, 160)
+frame.Position = UDim2.new(0.5, -160, 0.8, -80)
+frame.AnchorPoint = Vector2.new(0, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+frame.BorderSizePixel = 0
+frame.Parent = gui
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -20, 0, 30)
+title.Position = UDim2.new(0, 10, 0, 5)
+title.Text = "Spread Controller"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 16
+title.Font = Enum.Font.GothamBold
+title.BackgroundTransparency = 1
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = frame
+
+local valueLabel = Instance.new("TextLabel")
+valueLabel.Size = UDim2.new(1, -20, 0, 20)
+valueLabel.Position = UDim2.new(0, 10, 0, 45)
+valueLabel.Text = "Spread Amount: " .. SpreadMod.BulletSpread.Amount
+valueLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+valueLabel.TextSize = 14
+valueLabel.Font = Enum.Font.Gotham
+valueLabel.BackgroundTransparency = 1
+valueLabel.TextXAlignment = Enum.TextXAlignment.Left
+valueLabel.Parent = frame
+
+local slider = Instance.new("Frame")
+slider.Size = UDim2.new(0, 260, 0, 8)
+slider.Position = UDim2.new(0, 20, 0, 90)
+slider.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+slider.BorderSizePixel = 0
+slider.Parent = frame
+Instance.new("UICorner", slider).CornerRadius = UDim.new(0, 4)
+
+local knob = Instance.new("Frame")
+knob.Size = UDim2.new(0, 16, 0, 24)
+knob.Position = UDim2.new(SpreadMod.BulletSpread.Amount / 100, -6, -0.8, 0)
+knob.BackgroundColor3 = Color3.fromRGB(255, 120, 50)
+knob.BorderSizePixel = 0
+knob.Parent = slider
+Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
+local watermark = Instance.new("TextLabel")
+watermark.Size = UDim2.new(1, -30, 0, 20)
+watermark.Position = UDim2.new(0, 0, 0, 10)
+watermark.Text = ".gg/traced"
+watermark.TextColor3 = Color3.fromRGB(255, 255, 255)
+watermark.TextSize = 12
+watermark.Font = Enum.Font.Gotham
+watermark.BackgroundTransparency = 1
+watermark.TextXAlignment = Enum.TextXAlignment.Right
+watermark.Parent = frame
+
+local dragHandle = Instance.new("TextLabel")
+dragHandle.Size = UDim2.new(0, 60, 0, 20)
+dragHandle.Position = UDim2.new(1, -70, 1, -30)
+dragHandle.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+dragHandle.BorderSizePixel = 0
+dragHandle.Text = "DRAG"
+dragHandle.TextColor3 = Color3.fromRGB(255, 255, 255)
+dragHandle.TextSize = 14
+dragHandle.Font = Enum.Font.GothamBold
+dragHandle.Parent = frame
+Instance.new("UICorner", dragHandle).CornerRadius = UDim.new(0, 4)
+
+-- UI resizing logic for spread controller
+local draggingResize = false
+local initialMouseY
+local initialSize
+local minScale, maxScale = 0.9, 1.2
+
+dragHandle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingResize = true
+        initialMouseY = input.Position.Y
+        initialSize = frame.Size
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingResize = false
+    end
+end)
+
+local function UpdateUIElements()
+    slider.Size = UDim2.new(0, frame.Size.X.Offset - 60, 0, 8)
+    knob.Position = UDim2.new(SpreadMod.BulletSpread.Amount / 100, -6, -0.8, 0)
+    watermark.Position = UDim2.new(0, 0, 0, 10)
+    dragHandle.Position = UDim2.new(1, -70, 1, -30)
+    title.Size = UDim2.new(1, -20, 0, 30)
+    valueLabel.Size = UDim2.new(1, -20, 0, 20)
+end
+
+UserInputService.InputChanged:Connect(function(input)
+    if draggingResize and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local deltaY = input.Position.Y - initialMouseY
+        local scale = math.clamp(1 + deltaY / 300, minScale, maxScale)
+        frame.Size = UDim2.new(
+            initialSize.X.Scale,
+            math.clamp(initialSize.X.Offset * scale, initialSize.X.Offset * minScale, initialSize.X.Offset * maxScale),
+            initialSize.Y.Scale,
+            math.clamp(initialSize.Y.Offset * scale, initialSize.Y.Offset * minScale, initialSize.Y.Offset * maxScale)
+        )
+        UpdateUIElements()
+    end
+end)
+
+-- Slider interaction for spread controller
+local dragging = false
+knob.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local relX = math.clamp((input.Position.X - slider.AbsolutePosition.X) / slider.AbsoluteSize.X, 0, 1)
+        knob.Position = UDim2.new(relX, -6, -0.8, 0)
+        local spreadValue = math.floor(relX * 100)
+        SpreadMod.BulletSpread.Amount = spreadValue
+        valueLabel.Text = "Spread Amount: " .. spreadValue
+    end
+end)
+
+-- Toggle spread controller UI with Insert key
+UserInputService.InputBegan:Connect(function(input, gp)
+    if not gp and input.KeyCode == Enum.KeyCode.Insert then
+        frame.Visible = not frame.Visible
+    end
+end)
+
+-- Fire rate modification
+LocalPlayer.CharacterAdded:Connect(function(character)
+    character.ChildAdded:Connect(function(Tool)
+        for _, connection in pairs(getconnections(Tool.Activated)) do
+            local Info = debug.getinfo(connection.Function)
+            for Index = 1, Info.nups do
+                local value, name = debug.getupvalue(connection.Function, Index)
+                if type(value) == "number" then
+                    debug.setupvalue(connection.Function, Index, Delay)
+                end
+            end
+        end
+    end)
+end)
