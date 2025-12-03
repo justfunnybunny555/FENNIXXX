@@ -1,0 +1,902 @@
+-- ========================================
+-- FENNIXXX MAIN SCRIPT
+-- Требует: auth_module.lua
+-- ========================================
+
+-- ИНСТРУКЦИЯ ПО ИСПОЛЬЗОВАНИЮ:
+-- 1. Сначала загрузите auth_module.lua
+-- 2. Затем загрузите этот скрипт
+-- 3. Или используйте loadstring для загрузки модуля авторизации
+
+-- Загрузка модуля авторизации (выберите один из способов):
+
+-- СПОСОБ 1: Если оба файла загружены локально
+-- local AuthModule = loadfile("auth_module.lua")()
+
+-- СПОСОБ 2: Если вы используете loadstring с URL
+-- local AuthModule = loadstring(game:HttpGet("URL_TO_AUTH_MODULE"))()
+
+-- СПОСОБ 3: Для тестирования - встроенный вариант (закомментируйте если используете внешний модуль)
+-- Раскомментируйте строку ниже и вставьте содержимое auth_module.lua
+local AuthModule = loadstring(game:HttpGet("YOUR_AUTH_MODULE_URL_HERE"))()
+
+-- ========================================
+-- ROBLOX SERVICES
+-- ========================================
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- ========================================
+-- CONFIGURATION
+-- ========================================
+local Config = {
+    -- Silent Aim Settings
+    SilentAim = {
+        Enabled = false,
+        FOV = 150,
+        ShowFOV = true,
+        TargetPart = "Head",
+        WallCheck = true,
+        TeamCheck = true
+    },
+    
+    -- ESP Settings
+    ESP = {
+        Enabled = false,
+        Boxes = true,
+        Names = true,
+        Distance = true,
+        Health = true,
+        TeamCheck = true,
+        MaxDistance = 1000
+    },
+    
+    -- Rapid Fire Settings
+    RapidFire = {
+        Enabled = false,
+        Delay = 0.05
+    },
+    
+    -- WalkSpeed Settings
+    WalkSpeed = {
+        Enabled = false,
+        Speed = 50,
+        ToggleKey = Enum.KeyCode.Q
+    },
+    
+    -- Weapon Profiles
+    WeaponProfiles = {
+        ["Rifle"] = {FOV = 120, TargetPart = "Head"},
+        ["Shotgun"] = {FOV = 180, TargetPart = "Torso"},
+        ["Sniper"] = {FOV = 80, TargetPart = "Head"}
+    }
+}
+
+-- ========================================
+-- VARIABLES
+-- ========================================
+local FOVCircle
+local ESPObjects = {}
+local Connections = {}
+local OriginalNamecall
+
+-- ========================================
+-- UTILITY FUNCTIONS
+-- ========================================
+
+-- Проверка видимости цели
+local function isVisible(target)
+    if not Config.SilentAim.WallCheck then return true end
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, target.Parent}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    local rayResult = workspace:Raycast(
+        Camera.CFrame.Position,
+        (target.Position - Camera.CFrame.Position).Unit * 1000,
+        raycastParams
+    )
+    
+    return rayResult == nil or rayResult.Instance:IsDescendantOf(target.Parent)
+end
+
+-- Получение ближайшего игрока к центру экрана
+local function getClosestPlayerToCursor()
+    local closestPlayer = nil
+    local shortestDistance = Config.SilentAim.FOV
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local character = player.Character
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            
+            -- Проверки
+            if humanoid and humanoid.Health > 0 then
+                if Config.SilentAim.TeamCheck and player.Team == LocalPlayer.Team then
+                    continue
+                end
+                
+                local targetPart = character:FindFirstChild(Config.SilentAim.TargetPart) or character:FindFirstChild("HumanoidRootPart")
+                if targetPart then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                    
+                    if onScreen then
+                        local mousePos = UserInputService:GetMouseLocation()
+                        local distance = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                        
+                        if distance < shortestDistance and isVisible(targetPart) then
+                            closestPlayer = player
+                            shortestDistance = distance
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return closestPlayer
+end
+
+-- ========================================
+-- SILENT AIM
+-- ========================================
+
+local function initializeSilentAim()
+    -- Создание FOV круга
+    FOVCircle = Drawing.new("Circle")
+    FOVCircle.Thickness = 2
+    FOVCircle.NumSides = 64
+    FOVCircle.Radius = Config.SilentAim.FOV
+    FOVCircle.Filled = false
+    FOVCircle.Color = Color3.fromRGB(0, 255, 255)
+    FOVCircle.Transparency = 1
+    FOVCircle.Visible = Config.SilentAim.ShowFOV
+    
+    -- Обновление позиции FOV круга
+    Connections.FOVUpdate = RunService.RenderStepped:Connect(function()
+        if FOVCircle then
+            local mousePos = UserInputService:GetMouseLocation()
+            FOVCircle.Position = mousePos
+            FOVCircle.Radius = Config.SilentAim.FOV
+            FOVCircle.Visible = Config.SilentAim.ShowFOV and Config.SilentAim.Enabled
+        end
+    end)
+    
+    -- Hook для Silent Aim
+    local mt = getrawmetatable(game)
+    local oldNamecall = mt.__namecall
+    setreadonly(mt, false)
+    
+    mt.__namecall = newcclosure(function(self, ...)
+        local args = {...}
+        local method = getnamecallmethod()
+        
+        if Config.SilentAim.Enabled and method == "FireServer" or method == "InvokeServer" then
+            if tostring(self):find("Gun") or tostring(self):find("Fire") or tostring(self):find("Shoot") then
+                local closestPlayer = getClosestPlayerToCursor()
+                if closestPlayer and closestPlayer.Character then
+                    local targetPart = closestPlayer.Character:FindFirstChild(Config.SilentAim.TargetPart)
+                    if targetPart then
+                        -- Заменяем аргументы на позицию цели
+                        for i, v in pairs(args) do
+                            if typeof(v) == "Vector3" then
+                                args[i] = targetPart.Position
+                            elseif typeof(v) == "CFrame" then
+                                args[i] = CFrame.new(targetPart.Position)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        return oldNamecall(self, unpack(args))
+    end)
+    
+    setreadonly(mt, true)
+    OriginalNamecall = oldNamecall
+end
+
+-- ========================================
+-- ESP
+-- ========================================
+
+local function createESP(player)
+    if ESPObjects[player] then return end
+    
+    local ESPTable = {
+        Box = Drawing.new("Square"),
+        Name = Drawing.new("Text"),
+        Distance = Drawing.new("Text"),
+        HealthBar = Drawing.new("Square"),
+        HealthBarOutline = Drawing.new("Square")
+    }
+    
+    -- Box
+    ESPTable.Box.Thickness = 2
+    ESPTable.Box.Filled = false
+    ESPTable.Box.Color = Color3.fromRGB(255, 255, 255)
+    ESPTable.Box.Transparency = 1
+    ESPTable.Box.Visible = false
+    
+    -- Name
+    ESPTable.Name.Center = true
+    ESPTable.Name.Outline = true
+    ESPTable.Name.Color = Color3.fromRGB(255, 255, 255)
+    ESPTable.Name.Size = 16
+    ESPTable.Name.Font = 2
+    ESPTable.Name.Visible = false
+    
+    -- Distance
+    ESPTable.Distance.Center = true
+    ESPTable.Distance.Outline = true
+    ESPTable.Distance.Color = Color3.fromRGB(200, 200, 200)
+    ESPTable.Distance.Size = 14
+    ESPTable.Distance.Font = 2
+    ESPTable.Distance.Visible = false
+    
+    -- Health Bar
+    ESPTable.HealthBar.Thickness = 1
+    ESPTable.HealthBar.Filled = true
+    ESPTable.HealthBar.Color = Color3.fromRGB(0, 255, 0)
+    ESPTable.HealthBar.Transparency = 1
+    ESPTable.HealthBar.Visible = false
+    
+    -- Health Bar Outline
+    ESPTable.HealthBarOutline.Thickness = 1
+    ESPTable.HealthBarOutline.Filled = false
+    ESPTable.HealthBarOutline.Color = Color3.fromRGB(0, 0, 0)
+    ESPTable.HealthBarOutline.Transparency = 1
+    ESPTable.HealthBarOutline.Visible = false
+    
+    ESPObjects[player] = ESPTable
+end
+
+local function updateESP()
+    for player, espTable in pairs(ESPObjects) do
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChildOfClass("Humanoid") then
+            local character = player.Character
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            local rootPart = character.HumanoidRootPart
+            
+            -- Team check
+            if Config.ESP.TeamCheck and player.Team == LocalPlayer.Team then
+                for _, drawing in pairs(espTable) do
+                    drawing.Visible = false
+                end
+                continue
+            end
+            
+            local distance = (LocalPlayer.Character.HumanoidRootPart.Position - rootPart.Position).Magnitude
+            
+            -- Distance check
+            if distance > Config.ESP.MaxDistance then
+                for _, drawing in pairs(espTable) do
+                    drawing.Visible = false
+                end
+                continue
+            end
+            
+            local screenPos, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+            
+            if onScreen and Config.ESP.Enabled then
+                local headPos = Camera:WorldToViewportPoint(character.Head.Position + Vector3.new(0, 0.5, 0))
+                local legPos = Camera:WorldToViewportPoint(rootPart.Position - Vector3.new(0, 3, 0))
+                
+                local height = math.abs(headPos.Y - legPos.Y)
+                local width = height * 0.6
+                
+                -- Box
+                if Config.ESP.Boxes then
+                    espTable.Box.Size = Vector2.new(width, height)
+                    espTable.Box.Position = Vector2.new(screenPos.X - width / 2, screenPos.Y - height / 2)
+                    espTable.Box.Visible = true
+                else
+                    espTable.Box.Visible = false
+                end
+                
+                -- Name
+                if Config.ESP.Names then
+                    espTable.Name.Text = player.Name
+                    espTable.Name.Position = Vector2.new(screenPos.X, headPos.Y - 20)
+                    espTable.Name.Visible = true
+                else
+                    espTable.Name.Visible = false
+                end
+                
+                -- Distance
+                if Config.ESP.Distance then
+                    espTable.Distance.Text = string.format("[%d studs]", math.floor(distance))
+                    espTable.Distance.Position = Vector2.new(screenPos.X, legPos.Y + 5)
+                    espTable.Distance.Visible = true
+                else
+                    espTable.Distance.Visible = false
+                end
+                
+                -- Health Bar
+                if Config.ESP.Health then
+                    local healthPercent = humanoid.Health / humanoid.MaxHealth
+                    local barHeight = height * healthPercent
+                    
+                    espTable.HealthBar.Size = Vector2.new(4, barHeight)
+                    espTable.HealthBar.Position = Vector2.new(screenPos.X - width / 2 - 8, screenPos.Y - height / 2 + (height - barHeight))
+                    espTable.HealthBar.Color = Color3.fromRGB(255 * (1 - healthPercent), 255 * healthPercent, 0)
+                    espTable.HealthBar.Visible = true
+                    
+                    espTable.HealthBarOutline.Size = Vector2.new(4, height)
+                    espTable.HealthBarOutline.Position = Vector2.new(screenPos.X - width / 2 - 8, screenPos.Y - height / 2)
+                    espTable.HealthBarOutline.Visible = true
+                else
+                    espTable.HealthBar.Visible = false
+                    espTable.HealthBarOutline.Visible = false
+                end
+            else
+                for _, drawing in pairs(espTable) do
+                    drawing.Visible = false
+                end
+            end
+        else
+            for _, drawing in pairs(espTable) do
+                drawing.Visible = false
+            end
+        end
+    end
+end
+
+local function initializeESP()
+    -- Создание ESP для всех игроков
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            createESP(player)
+        end
+    end
+    
+    -- Создание ESP для новых игроков
+    Players.PlayerAdded:Connect(function(player)
+        createESP(player)
+    end)
+    
+    -- Удаление ESP при выходе игрока
+    Players.PlayerRemoving:Connect(function(player)
+        if ESPObjects[player] then
+            for _, drawing in pairs(ESPObjects[player]) do
+                drawing:Remove()
+            end
+            ESPObjects[player] = nil
+        end
+    end)
+    
+    -- Обновление ESP
+    Connections.ESPUpdate = RunService.RenderStepped:Connect(updateESP)
+end
+
+-- ========================================
+-- RAPID FIRE
+-- ========================================
+
+local function initializeRapidFire()
+    -- Rapid Fire реализуется через hook событий стрельбы
+    -- Специфично для каждой игры
+    warn("Rapid Fire: Требует настройку для конкретной игры")
+end
+
+-- ========================================
+-- WALKSPEED
+-- ========================================
+
+local function initializeWalkSpeed()
+    Connections.WalkSpeedToggle = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if not gameProcessed and input.KeyCode == Config.WalkSpeed.ToggleKey then
+            Config.WalkSpeed.Enabled = not Config.WalkSpeed.Enabled
+            
+            if Config.WalkSpeed.Enabled then
+                LocalPlayer.Character.Humanoid.WalkSpeed = Config.WalkSpeed.Speed
+                game.StarterGui:SetCore("SendNotification", {
+                    Title = "FENNIXXX",
+                    Text = "WalkSpeed Enabled: " .. Config.WalkSpeed.Speed,
+                    Duration = 2
+                })
+            else
+                LocalPlayer.Character.Humanoid.WalkSpeed = 16
+                game.StarterGui:SetCore("SendNotification", {
+                    Title = "FENNIXXX",
+                    Text = "WalkSpeed Disabled",
+                    Duration = 2
+                })
+            end
+        end
+    end)
+    
+    Connections.WalkSpeedUpdate = RunService.Heartbeat:Connect(function()
+        if Config.WalkSpeed.Enabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.WalkSpeed = Config.WalkSpeed.Speed
+        end
+    end)
+end
+
+-- ========================================
+-- GUI CREATION
+-- ========================================
+
+local function createMainGUI()
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "FENNIXXXMainGUI"
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.IgnoreGuiInset = true
+    ScreenGui.Parent = CoreGui
+    
+    -- Main Frame
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(0, 600, 0, 450)
+    MainFrame.Position = UDim2.new(0.5, -300, 0.5, -225)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Active = true
+    MainFrame.Draggable = true
+    MainFrame.Visible = false
+    MainFrame.Parent = ScreenGui
+    
+    local MainCorner = Instance.new("UICorner", MainFrame)
+    MainCorner.CornerRadius = UDim.new(0, 12)
+    
+    local MainStroke = Instance.new("UIStroke", MainFrame)
+    MainStroke.Color = Color3.fromRGB(0, 255, 255)
+    MainStroke.Thickness = 2
+    
+    -- Title Bar
+    local TitleBar = Instance.new("Frame")
+    TitleBar.Name = "TitleBar"
+    TitleBar.Size = UDim2.new(1, 0, 0, 40)
+    TitleBar.BackgroundColor3 = Color3.fromRGB(10, 10, 20)
+    TitleBar.BorderSizePixel = 0
+    TitleBar.Parent = MainFrame
+    
+    local TitleCorner = Instance.new("UICorner", TitleBar)
+    TitleCorner.CornerRadius = UDim.new(0, 12)
+    
+    local TitleLabel = Instance.new("TextLabel")
+    TitleLabel.Size = UDim2.new(1, -100, 1, 0)
+    TitleLabel.Position = UDim2.new(0, 15, 0, 0)
+    TitleLabel.Text = "FENNIXXX v1.0"
+    TitleLabel.TextColor3 = Color3.fromRGB(0, 255, 255)
+    TitleLabel.TextSize = 18
+    TitleLabel.Font = Enum.Font.GothamBold
+    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TitleLabel.BackgroundTransparency = 1
+    TitleLabel.Parent = TitleBar
+    
+    -- Close Button
+    local CloseButton = Instance.new("TextButton")
+    CloseButton.Size = UDim2.new(0, 30, 0, 30)
+    CloseButton.Position = UDim2.new(1, -35, 0, 5)
+    CloseButton.Text = "X"
+    CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    CloseButton.TextSize = 18
+    CloseButton.Font = Enum.Font.GothamBold
+    CloseButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    CloseButton.BorderSizePixel = 0
+    CloseButton.Parent = TitleBar
+    
+    local CloseCorner = Instance.new("UICorner", CloseButton)
+    CloseCorner.CornerRadius = UDim.new(0, 8)
+    
+    CloseButton.MouseButton1Click:Connect(function()
+        MainFrame.Visible = false
+    end)
+    
+    -- Tab Container
+    local TabContainer = Instance.new("Frame")
+    TabContainer.Name = "TabContainer"
+    TabContainer.Size = UDim2.new(0, 120, 1, -50)
+    TabContainer.Position = UDim2.new(0, 10, 0, 45)
+    TabContainer.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    TabContainer.BorderSizePixel = 0
+    TabContainer.Parent = MainFrame
+    
+    local TabCorner = Instance.new("UICorner", TabContainer)
+    TabCorner.CornerRadius = UDim.new(0, 10)
+    
+    local TabLayout = Instance.new("UIListLayout", TabContainer)
+    TabLayout.Padding = UDim.new(0, 5)
+    TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    
+    local TabPadding = Instance.new("UIPadding", TabContainer)
+    TabPadding.PaddingTop = UDim.new(0, 10)
+    TabPadding.PaddingLeft = UDim.new(0, 10)
+    TabPadding.PaddingRight = UDim.new(0, 10)
+    
+    -- Content Container
+    local ContentContainer = Instance.new("Frame")
+    ContentContainer.Name = "ContentContainer"
+    ContentContainer.Size = UDim2.new(1, -150, 1, -50)
+    ContentContainer.Position = UDim2.new(0, 140, 0, 45)
+    ContentContainer.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    ContentContainer.BorderSizePixel = 0
+    ContentContainer.Parent = MainFrame
+    
+    local ContentCorner = Instance.new("UICorner", ContentContainer)
+    ContentCorner.CornerRadius = UDim.new(0, 10)
+    
+    -- Tab System
+    local Tabs = {}
+    local CurrentTab = nil
+    
+    local function createTab(name, icon)
+        local TabButton = Instance.new("TextButton")
+        TabButton.Name = name .. "Tab"
+        TabButton.Size = UDim2.new(1, 0, 0, 35)
+        TabButton.Text = icon .. " " .. name
+        TabButton.TextColor3 = Color3.fromRGB(150, 150, 180)
+        TabButton.TextSize = 14
+        TabButton.Font = Enum.Font.GothamBold
+        TabButton.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+        TabButton.BorderSizePixel = 0
+        TabButton.TextXAlignment = Enum.TextXAlignment.Left
+        TabButton.Parent = TabContainer
+        
+        local TabButtonPadding = Instance.new("UIPadding", TabButton)
+        TabButtonPadding.PaddingLeft = UDim.new(0, 10)
+        
+        local TabButtonCorner = Instance.new("UICorner", TabButton)
+        TabButtonCorner.CornerRadius = UDim.new(0, 8)
+        
+        local TabContent = Instance.new("ScrollingFrame")
+        TabContent.Name = name .. "Content"
+        TabContent.Size = UDim2.new(1, -20, 1, -20)
+        TabContent.Position = UDim2.new(0, 10, 0, 10)
+        TabContent.BackgroundTransparency = 1
+        TabContent.BorderSizePixel = 0
+        TabContent.ScrollBarThickness = 6
+        TabContent.Visible = false
+        TabContent.Parent = ContentContainer
+        
+        local ContentLayout = Instance.new("UIListLayout", TabContent)
+        ContentLayout.Padding = UDim.new(0, 10)
+        ContentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        
+        TabButton.MouseButton1Click:Connect(function()
+            if CurrentTab then
+                CurrentTab.Button.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+                CurrentTab.Button.TextColor3 = Color3.fromRGB(150, 150, 180)
+                CurrentTab.Content.Visible = false
+            end
+            
+            TabButton.BackgroundColor3 = Color3.fromRGB(0, 200, 200)
+            TabButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+            TabContent.Visible = true
+            
+            CurrentTab = {Button = TabButton, Content = TabContent}
+        end)
+        
+        Tabs[name] = {Button = TabButton, Content = TabContent}
+        return TabContent
+    end
+    
+    -- Helper function to create toggle
+    local function createToggle(parent, text, default, callback)
+        local ToggleFrame = Instance.new("Frame")
+        ToggleFrame.Size = UDim2.new(1, 0, 0, 35)
+        ToggleFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+        ToggleFrame.BorderSizePixel = 0
+        ToggleFrame.Parent = parent
+        
+        local ToggleCorner = Instance.new("UICorner", ToggleFrame)
+        ToggleCorner.CornerRadius = UDim.new(0, 8)
+        
+        local ToggleLabel = Instance.new("TextLabel")
+        ToggleLabel.Size = UDim2.new(1, -60, 1, 0)
+        ToggleLabel.Position = UDim2.new(0, 10, 0, 0)
+        ToggleLabel.Text = text
+        ToggleLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
+        ToggleLabel.TextSize = 14
+        ToggleLabel.Font = Enum.Font.Gotham
+        ToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+        ToggleLabel.BackgroundTransparency = 1
+        ToggleLabel.Parent = ToggleFrame
+        
+        local ToggleButton = Instance.new("TextButton")
+        ToggleButton.Size = UDim2.new(0, 45, 0, 25)
+        ToggleButton.Position = UDim2.new(1, -50, 0.5, -12.5)
+        ToggleButton.Text = ""
+        ToggleButton.BackgroundColor3 = default and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(100, 100, 120)
+        ToggleButton.BorderSizePixel = 0
+        ToggleButton.Parent = ToggleFrame
+        
+        local ToggleButtonCorner = Instance.new("UICorner", ToggleButton)
+        ToggleButtonCorner.CornerRadius = UDim.new(1, 0)
+        
+        local ToggleIndicator = Instance.new("Frame")
+        ToggleIndicator.Size = UDim2.new(0, 19, 0, 19)
+        ToggleIndicator.Position = default and UDim2.new(1, -22, 0.5, -9.5) or UDim2.new(0, 3, 0.5, -9.5)
+        ToggleIndicator.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        ToggleIndicator.BorderSizePixel = 0
+        ToggleIndicator.Parent = ToggleButton
+        
+        local IndicatorCorner = Instance.new("UICorner", ToggleIndicator)
+        IndicatorCorner.CornerRadius = UDim.new(1, 0)
+        
+        local toggled = default
+        
+        ToggleButton.MouseButton1Click:Connect(function()
+            toggled = not toggled
+            
+            TweenService:Create(ToggleButton, TweenInfo.new(0.2), {
+                BackgroundColor3 = toggled and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(100, 100, 120)
+            }):Play()
+            
+            TweenService:Create(ToggleIndicator, TweenInfo.new(0.2), {
+                Position = toggled and UDim2.new(1, -22, 0.5, -9.5) or UDim2.new(0, 3, 0.5, -9.5)
+            }):Play()
+            
+            if callback then
+                callback(toggled)
+            end
+        end)
+        
+        return ToggleButton
+    end
+    
+    -- Helper function to create slider
+    local function createSlider(parent, text, min, max, default, callback)
+        local SliderFrame = Instance.new("Frame")
+        SliderFrame.Size = UDim2.new(1, 0, 0, 50)
+        SliderFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+        SliderFrame.BorderSizePixel = 0
+        SliderFrame.Parent = parent
+        
+        local SliderCorner = Instance.new("UICorner", SliderFrame)
+        SliderCorner.CornerRadius = UDim.new(0, 8)
+        
+        local SliderLabel = Instance.new("TextLabel")
+        SliderLabel.Size = UDim2.new(1, -20, 0, 20)
+        SliderLabel.Position = UDim2.new(0, 10, 0, 5)
+        SliderLabel.Text = text .. ": " .. default
+        SliderLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
+        SliderLabel.TextSize = 14
+        SliderLabel.Font = Enum.Font.Gotham
+        SliderLabel.TextXAlignment = Enum.TextXAlignment.Left
+        SliderLabel.BackgroundTransparency = 1
+        SliderLabel.Parent = SliderFrame
+        
+        local SliderTrack = Instance.new("Frame")
+        SliderTrack.Size = UDim2.new(1, -20, 0, 6)
+        SliderTrack.Position = UDim2.new(0, 10, 1, -15)
+        SliderTrack.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+        SliderTrack.BorderSizePixel = 0
+        SliderTrack.Parent = SliderFrame
+        
+        local TrackCorner = Instance.new("UICorner", SliderTrack)
+        TrackCorner.CornerRadius = UDim.new(1, 0)
+        
+        local SliderFill = Instance.new("Frame")
+        SliderFill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+        SliderFill.BackgroundColor3 = Color3.fromRGB(0, 200, 200)
+        SliderFill.BorderSizePixel = 0
+        SliderFill.Parent = SliderTrack
+        
+        local FillCorner = Instance.new("UICorner", SliderFill)
+        FillCorner.CornerRadius = UDim.new(1, 0)
+        
+        local SliderButton = Instance.new("TextButton")
+        SliderButton.Size = UDim2.new(0, 14, 0, 14)
+        SliderButton.Position = UDim2.new((default - min) / (max - min), -7, 0.5, -7)
+        SliderButton.Text = ""
+        SliderButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        SliderButton.BorderSizePixel = 0
+        SliderButton.Parent = SliderTrack
+        
+        local ButtonCorner = Instance.new("UICorner", SliderButton)
+        ButtonCorner.CornerRadius = UDim.new(1, 0)
+        
+        local dragging = false
+        local currentValue = default
+        
+        SliderButton.MouseButton1Down:Connect(function()
+            dragging = true
+        end)
+        
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = false
+            end
+        end)
+        
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local mousePos = UserInputService:GetMouseLocation()
+                local trackPos = SliderTrack.AbsolutePosition
+                local trackSize = SliderTrack.AbsoluteSize
+                
+                local relativePos = math.clamp((mousePos.X - trackPos.X) / trackSize.X, 0, 1)
+                currentValue = math.floor(min + (max - min) * relativePos)
+                
+                SliderLabel.Text = text .. ": " .. currentValue
+                SliderFill.Size = UDim2.new(relativePos, 0, 1, 0)
+                SliderButton.Position = UDim2.new(relativePos, -7, 0.5, -7)
+                
+                if callback then
+                    callback(currentValue)
+                end
+            end
+        end)
+        
+        return SliderFrame
+    end
+    
+    -- ========================================
+    -- СОЗДАНИЕ ВКЛАДОК
+    -- ========================================
+    
+    -- Combat Tab
+    local CombatTab = createTab("Combat", "⚔️")
+    
+    createToggle(CombatTab, "Silent Aim", Config.SilentAim.Enabled, function(value)
+        Config.SilentAim.Enabled = value
+        game.StarterGui:SetCore("SendNotification", {
+            Title = "Silent Aim",
+            Text =value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end)
+    
+    createToggle(CombatTab, "Show FOV Circle", Config.SilentAim.ShowFOV, function(value)
+        Config.SilentAim.ShowFOV = value
+    end)
+    
+    createSlider(CombatTab, "FOV Size", 50, 300, Config.SilentAim.FOV, function(value)
+        Config.SilentAim.FOV = value
+    end)
+    
+    createToggle(CombatTab, "Wall Check", Config.SilentAim.WallCheck, function(value)
+        Config.SilentAim.WallCheck = value
+    end)
+    
+    createToggle(CombatTab, "Team Check", Config.SilentAim.TeamCheck, function(value)
+        Config.SilentAim.TeamCheck = value
+    end)
+    
+    createToggle(CombatTab, "Rapid Fire", Config.RapidFire.Enabled, function(value)
+        Config.RapidFire.Enabled = value
+    end)
+    
+    -- Visuals Tab
+    local VisualsTab = createTab("Visuals", "👁️")
+    
+    createToggle(VisualsTab, "ESP Enabled", Config.ESP.Enabled, function(value)
+        Config.ESP.Enabled = value
+        game.StarterGui:SetCore("SendNotification", {
+            Title = "ESP",
+            Text = value and "Enabled" or "Disabled",
+            Duration = 2
+        })
+    end)
+    
+    createToggle(VisualsTab, "Boxes", Config.ESP.Boxes, function(value)
+        Config.ESP.Boxes = value
+    end)
+    
+    createToggle(VisualsTab, "Names", Config.ESP.Names, function(value)
+        Config.ESP.Names = value
+    end)
+    
+    createToggle(VisualsTab, "Distance", Config.ESP.Distance, function(value)
+        Config.ESP.Distance = value
+    end)
+    
+    createToggle(VisualsTab, "Health Bar", Config.ESP.Health, function(value)
+        Config.ESP.Health = value
+    end)
+    
+    createToggle(VisualsTab, "Team Check", Config.ESP.TeamCheck, function(value)
+        Config.ESP.TeamCheck = value
+    end)
+    
+    createSlider(VisualsTab, "Max Distance", 100, 3000, Config.ESP.MaxDistance, function(value)
+        Config.ESP.MaxDistance = value
+    end)
+    
+    -- Movement Tab
+    local MovementTab = createTab("Movement", "🏃")
+    
+    createToggle(MovementTab, "WalkSpeed", Config.WalkSpeed.Enabled, function(value)
+        Config.WalkSpeed.Enabled = value
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.WalkSpeed = value and Config.WalkSpeed.Speed or 16
+        end
+    end)
+    
+    createSlider(MovementTab, "Speed", 16, 200, Config.WalkSpeed.Speed, function(value)
+        Config.WalkSpeed.Speed = value
+        if Config.WalkSpeed.Enabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.WalkSpeed = value
+        end
+    end)
+    
+    -- Settings Tab
+    local SettingsTab = createTab("Settings", "⚙️")
+    
+    local InfoLabel = Instance.new("TextLabel")
+    InfoLabel.Size = UDim2.new(1, 0, 0, 100)
+    InfoLabel.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+    InfoLabel.BorderSizePixel = 0
+    InfoLabel.Text = "FENNIXXX v1.0\n\nPress INSERT to toggle GUI\nPress Q to toggle WalkSpeed\n\nAuthor: FENNIXXX Team"
+    InfoLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
+    InfoLabel.TextSize = 14
+    InfoLabel.Font = Enum.Font.Gotham
+    InfoLabel.Parent = SettingsTab
+    
+    local InfoCorner = Instance.new("UICorner", InfoLabel)
+    InfoCorner.CornerRadius = UDim.new(0, 8)
+    
+    -- Установка первой вкладки активной
+    if Tabs["Combat"] then
+        Tabs["Combat"].Button.BackgroundColor3 = Color3.fromRGB(0, 200, 200)
+        Tabs["Combat"].Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Tabs["Combat"].Content.Visible = true
+        CurrentTab = Tabs["Combat"]
+    end
+    
+    -- Toggle GUI visibility
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if not gameProcessed and input.KeyCode == Enum.KeyCode.Insert then
+            MainFrame.Visible = not MainFrame.Visible
+        end
+    end)
+    
+    return ScreenGui
+end
+
+-- ========================================
+-- INITIALIZATION
+-- ========================================
+
+local function initializeScript()
+    -- Notification
+    game.StarterGui:SetCore("SendNotification", {
+        Title = "FENNIXXX",
+        Text = "Loading...",
+        Duration = 3
+    })
+    
+    wait(0.5)
+    
+    -- Initialize features
+    initializeSilentAim()
+    initializeESP()
+    initializeWalkSpeed()
+    
+    -- Create GUI
+    createMainGUI()
+    
+    wait(1)
+    
+    -- Success notification
+    game.StarterGui:SetCore("SendNotification", {
+        Title = "FENNIXXX",
+        Text = "Successfully loaded!\nPress INSERT to open menu",
+        Duration = 5
+    })
+end
+
+-- ========================================
+-- START SCRIPT
+-- ========================================
+
+-- Проверка авторизации и запуск
+if AuthModule then
+    -- Создаём GUI авторизации с callback
+    AuthModule.createAuthGUI(function()
+        -- Этот код выполнится после успешной авторизации
+        initializeScript()
+    end)
+else
+    warn("Auth Module not loaded! Please load auth_module.lua first")
+end
