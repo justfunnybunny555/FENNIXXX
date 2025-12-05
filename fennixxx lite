@@ -32,7 +32,7 @@ local KeyAuthApp = "FENNIXXX"
 local KeyAuthOwnerIDs = {
     "Gi9EhXEQsn",
     -- Добавляйте дополнительные OwnerID сюда:
-    "B05VCYnbf0"
+    "B05VCYnbf0",
     "6oOmPZgEug",
     "edcEgR58Gp",
     "Gi9EhXEQsn"
