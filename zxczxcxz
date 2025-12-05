@@ -1,12 +1,13 @@
 --[[
-    ███████╗███████╗███╗   ███╗███╗   ██╗██╗██╗  ██╗██╗  ██╗██╗  ██╗
-    ██╔════╝██╔════╝████╗ ████║████╗  ██║██║╚██╗██╔╝╚██╗██╔╝╚██╗██╔╝
-    █████╗  █████╗  ██╔████╔██║██╔██╗ ██║██║ ╚███╔╝  ╚███╔╝  ╚███╔╝ 
-    ██╔══╝  ██╔══╝  ██║╚██╔╝██║██║╚██╗██║██║ ██╔██╗  ██╔██╗  ██╔██╗ 
-    ██║     ███████╗██║ ╚═╝ ██║██║ ╚████║██║██╔╝ ██╗██╔╝ ██╗██╔╝ ██╗
-    ╚═╝     ╚══════╝╚═╝     ╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝
-              iOS 18 CONTROL CENTER STYLE - LITE VERSION
-    Made with ❤ by FENNIXXX Team
+     ███████╗███████╗███╗   ███╗███╗   ██╗██╗██╗  ██╗██╗  ██╗██╗  ██╗
+     ██╔════╝██╔════╝████╗ ████║████╗  ██║██║╚██╗██╔╝╚██╗██╔╝╚██╗██╔╝
+     █████╗  █████╗  ██╔████╔██║██╔██╗ ██║██║ ╚███╔╝  ╚███╔╝  ╚███╔╝
+      ██╔══╝  ██╔══╝  ██║╚██╔╝██║██║╚██╗██║██║ ██╔██╗  ██╔██╗  ██╔██╗
+      ██║     ███████╗██║ ╚═╝ ██║██║ ╚████║██║██╔╝ ██╗██╔╝ ██╗██╔╝ ██╗
+     ╚═╝     ╚══════╝╚═╝     ╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝
+
+     iOS 18 CONTROL CENTER STYLE - COLLAPSIBLE GUI WITH FLOATING BUTTON
+     Made with ❤ by FENNIXXX Team
 ]]
 
 -- ════════════════════════════════════════════════════════════════
@@ -29,7 +30,7 @@ local Camera = workspace.CurrentCamera
 
 --- KeyAuth Configuration
 local KeyAuthApp = "FENNIXXX"
-local KeyAuthOwnerID = "6oOmPZgEug"
+local KeyAuthOwnerID = "Gi9EhXEQsn"
 local KeyAuthVersion = "1.0"
 local KeyAuthURL = "https://keyauth.win/api/1.2/"
 
@@ -169,7 +170,7 @@ local function createAuthGUI()
     local logoText = Instance.new("TextLabel")
     logoText.Size = UDim2.new(1, 0, 0, 70)
     logoText.Position = UDim2.new(0, 0, 0, 30)
-    logoText.Text = "FENNIXXX Lite"
+    logoText.Text = "FENNIXXX"
     logoText.TextColor3 = Color3.fromRGB(60, 60, 67)
     logoText.TextSize = 34
     logoText.Font = Enum.Font.GothamBold
@@ -459,6 +460,8 @@ local Config = {
     ShowFOV = false,
     RapidFire = false,
     RapidFireDelay = 0.05,
+    Multipoint = false,
+    MultipointSize = 1,
     ShowTargeting = false,
     
     UpdateRate = 1,
@@ -490,6 +493,13 @@ local Config = {
         SkeletonColor = Color3.fromRGB(0, 122, 255),
         MaxDistance = 500,
         TeamCheck = false
+    }
+}
+
+local SpreadMod = {
+    BulletSpread = {
+        Enabled = true,
+        Amount = 70
     }
 }
 
@@ -545,6 +555,15 @@ TargetIndicator.Transparency = 1
 TargetIndicator.NumSides = 16
 TargetIndicator.Radius = 8
 TargetIndicator.Filled = false
+
+local MultipointCircle = Drawing.new("Circle")
+MultipointCircle.Visible = false
+MultipointCircle.Thickness = 1
+MultipointCircle.Color = Color3.fromRGB(0, 122, 255)
+MultipointCircle.Transparency = 0.5
+MultipointCircle.NumSides = 12
+MultipointCircle.Radius = 5
+MultipointCircle.Filled = false
 
 local cachedTarget = nil
 local cachedTargetPoint = nil
@@ -922,13 +941,49 @@ local function resolveVelocity(part)
     return Vector3.new(0, 0, 0)
 end
 
+local function getClosestPointOnPart(part, mousePos)
+    if not Config.Multipoint then
+        return part.Position
+    end
+    
+    local size = part.Size
+    local cf = part.CFrame
+    
+    local multipointSize = Config.MultipointSize / 10
+    
+    local points = {
+        part.Position,
+        (cf * CFrame.new(size.X * multipointSize, 0, 0)).Position,
+        (cf * CFrame.new(-size.X * multipointSize, 0, 0)).Position,
+        (cf * CFrame.new(0, size.Y * multipointSize, 0)).Position,
+        (cf * CFrame.new(0, -size.Y * multipointSize, 0)).Position,
+    }
+    
+    local closestPoint = part.Position
+    local closestDist = math.huge
+    
+    for _, point in ipairs(points) do
+        local screenPos, onScreen = Camera:WorldToViewportPoint(point)
+        if onScreen then
+            local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+            if dist < closestDist then
+                closestDist = dist
+                closestPoint = point
+            end
+        end
+    end
+    
+    return closestPoint
+end
+
 local function getClosestPart(character)
     if not character then return nil, nil end
     
-    if Config.HitPart ~= "Closest Part" then
+    if Config.HitPart ~= "Closest Point" then
         local part = character:FindFirstChild(Config.HitPart)
         if part and part:IsA("BasePart") then
-            return part, part.Position
+            local hitPoint = getClosestPointOnPart(part, mouseLocation)
+            return part, hitPoint
         end
     end
     
@@ -937,7 +992,8 @@ local function getClosestPart(character)
     for _, partName in ipairs(allBodyParts) do
         local part = character:FindFirstChild(partName)
         if part and part:IsA("BasePart") then
-            local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+            local hitPoint = getClosestPointOnPart(part, mouseLocation)
+            local screenPos, onScreen = Camera:WorldToViewportPoint(hitPoint)
             
             if onScreen then
                 local partPos = Vector2.new(screenPos.X, screenPos.Y)
@@ -945,7 +1001,7 @@ local function getClosestPart(character)
                 
                 if dist < bestDist then
                     bestPart = part
-                    bestPoint = part.Position
+                    bestPoint = hitPoint
                     bestDist = dist
                 end
             end
@@ -1011,10 +1067,6 @@ local function updateTarget()
         local part, hitPoint = getClosestPart(player.Character)
         
         if part and hitPoint then
-            if Config.VisibleCheck and not isVisible(part) then
-                continue
-            end
-            
             local screenPos, onScreen = Camera:WorldToViewportPoint(hitPoint)
             if not onScreen then continue end
             
@@ -1058,6 +1110,15 @@ Services.RunService.RenderStepped:Connect(function()
         FOVCircle.Radius = Config.FOVSize
         FOVCircle.Visible = Config.ShowFOV
         FOVCircle.Color = Config.AccentColor
+        
+        if Config.Multipoint then
+            MultipointCircle.Position = mouseLocation
+            MultipointCircle.Radius = Config.MultipointSize * 3
+            MultipointCircle.Visible = Config.ShowFOV
+            MultipointCircle.Color = Config.AccentColor
+        else
+            MultipointCircle.Visible = false
+        end
         
         if Config.ShowTargeting and cachedTarget and cachedTargetPoint and Config.Enabled then
             local screenPos, onScreen = Camera:WorldToViewportPoint(cachedTargetPoint)
@@ -1142,6 +1203,18 @@ end
 
 setupRapidFire()
 
+local oldRandom
+oldRandom = hookfunction(math.random, function(...)
+    local args = {...}
+    if checkcaller() then return oldRandom(...) end
+    if (#args == 0) or (args[1] == -0.05 and args[2] == 0.05) or (args[1] == -0.1) or (args[1] == -0.05) then
+        if SpreadMod.BulletSpread.Enabled then
+            return oldRandom(...) * (SpreadMod.BulletSpread.Amount / 100)
+        end
+    end
+    return oldRandom(...)
+end)
+
 Services.Players.PlayerRemoving:Connect(function(player)
     teamCheckCache[player.UserId] = nil
     knockedCache[player.UserId] = nil
@@ -1150,7 +1223,7 @@ end)
 setupWalkSpeed()
 
 -- ════════════════════════════════════════════════════════════════
--- iOS 18 CONTROL CENTER STYLE GUI
+-- iOS 18 COLLAPSIBLE CONTROL CENTER STYLE GUI WITH FLOATING BUTTON
 -- ════════════════════════════════════════════════════════════════
 
 local gui = Instance.new("ScreenGui")
@@ -1163,6 +1236,7 @@ local blurEffect = Instance.new("BlurEffect")
 blurEffect.Size = 0
 blurEffect.Parent = game:GetService("Lighting")
 
+-- ОСНОВНОЙ ФРЕЙМ ГУИ
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0, Config.GUISize.Width, 0, Config.GUISize.Height)
 mainFrame.Position = UDim2.new(0.5, -Config.GUISize.Width/2, 0.5, -Config.GUISize.Height/2)
@@ -1182,6 +1256,170 @@ mainStroke.Color = Color3.fromRGB(210, 210, 215)
 mainStroke.Thickness = 1
 mainStroke.Transparency = 0.5
 
+-- КНОПКА ЗАКРЫТИЯ И ОТКРЫТИЯ ВНУТРИ ГУИ
+local closeButtonInside = Instance.new("TextButton")
+closeButtonInside.Size = UDim2.new(0, 45, 0, 45)
+closeButtonInside.Position = UDim2.new(1, -65, 0, 12)
+closeButtonInside.BackgroundColor3 = Color3.fromRGB(230, 230, 235)
+closeButtonInside.Text = "✕"
+closeButtonInside.TextColor3 = Color3.fromRGB(0, 0, 0)
+closeButtonInside.TextSize = 24
+closeButtonInside.Font = Enum.Font.GothamBold
+closeButtonInside.BorderSizePixel = 0
+closeButtonInside.ZIndex = 100
+closeButtonInside.Parent = mainFrame
+
+local closeCornerInside = Instance.new("UICorner", closeButtonInside)
+closeCornerInside.CornerRadius = UDim.new(1, 0)
+
+local closeStrokeInside = Instance.new("UIStroke", closeButtonInside)
+closeStrokeInside.Color = Color3.fromRGB(210, 210, 215)
+closeStrokeInside.Thickness = 1
+closeStrokeInside.Transparency = 0.5
+
+-- ПЛАВАЮЩАЯ КНОПКА ОТКРЫТИЯ (В СТИЛЕ iOS)
+local floatingButton = Instance.new("TextButton")
+floatingButton.Size = UDim2.new(0, 60, 0, 60)
+floatingButton.Position = UDim2.new(1, -75, 1, -75)
+floatingButton.BackgroundColor3 = Config.AccentColor
+floatingButton.Text = "F"
+floatingButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+floatingButton.TextSize = 28
+floatingButton.Font = Enum.Font.GothamBold
+floatingButton.BorderSizePixel = 0
+floatingButton.ZIndex = 50
+floatingButton.Parent = gui
+
+local floatingCorner = Instance.new("UICorner", floatingButton)
+floatingCorner.CornerRadius = UDim.new(1, 0)
+
+-- ТЕНЬ ДЛЯ ПЛАВАЮЩЕЙ КНОПКИ
+local shadow = Instance.new("Frame")
+shadow.Size = UDim2.new(0, 60, 0, 60)
+shadow.Position = floatingButton.Position + UDim2.new(0, 2, 0, 2)
+shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+shadow.BorderSizePixel = 0
+shadow.ZIndex = 49
+shadow.BackgroundTransparency = 0.3
+shadow.Parent = gui
+
+local shadowCorner = Instance.new("UICorner", shadow)
+shadowCorner.CornerRadius = UDim.new(1, 0)
+
+-- ПЕРЕМЕННЫЕ ДЛЯ ПЕРЕМЕЩЕНИЯ КНОПКИ
+local isDraggingFloatingButton = false
+local dragStartPos = nil
+local buttonStartPos = nil
+
+-- СОБЫТИЕ НАЖАТИЯ НА ПЛАВАЮЩУЮ КНОПКУ
+floatingButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isDraggingFloatingButton = true
+        dragStartPos = Services.UserInputService:GetMouseLocation()
+        buttonStartPos = floatingButton.Position
+    end
+end)
+
+-- СОБЫТИЕ ОТПУСКАНИЯ КНОПКИ
+Services.UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isDraggingFloatingButton = false
+    end
+end)
+
+-- ОБНОВЛЕНИЕ ПОЗИЦИИ ПЛАВАЮЩЕЙ КНОПКИ ПРИ ПЕРЕТАСКИВАНИИ
+Services.RunService.RenderStepped:Connect(function()
+    if isDraggingFloatingButton then
+        local currentMouse = Services.UserInputService:GetMouseLocation()
+        local delta = currentMouse - dragStartPos
+        
+        floatingButton.Position = UDim2.new(
+            buttonStartPos.X.Scale,
+            buttonStartPos.X.Offset + delta.X,
+            buttonStartPos.Y.Scale,
+            buttonStartPos.Y.Offset + delta.Y
+        )
+        
+        shadow.Position = floatingButton.Position + UDim2.new(0, 2, 0, 2)
+    end
+end)
+
+-- СОБЫТИЕ КЛИКА НА ПЛАВАЮЩУЮ КНОПКУ (ОТКРЫТИЕ ГУИ)
+floatingButton.MouseButton1Click:Connect(function()
+    if not isDraggingFloatingButton or (Services.UserInputService:GetMouseLocation() - dragStartPos).Magnitude < 5 then
+        mainFrame.Visible = true
+        
+        mainFrame.Size = UDim2.new(0, 0, 0, 0)
+        mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+        
+        Services.TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, Config.GUISize.Width, 0, Config.GUISize.Height),
+            Position = UDim2.new(0.5, -Config.GUISize.Width/2, 0.5, -Config.GUISize.Height/2)
+        }):Play()
+        
+        Services.TweenService:Create(blurEffect, TweenInfo.new(0.3), {
+            Size = 15
+        }):Play()
+        
+        Services.TweenService:Create(floatingButton, TweenInfo.new(0.3), {
+            BackgroundColor3 = Color3.fromRGB(142, 142, 147)
+        }):Play()
+    end
+end)
+
+-- СОБЫТИЕ КЛИКА НА КНОПКУ ЗАКРЫТИЯ
+closeButtonInside.MouseButton1Click:Connect(function()
+    mainFrame.Visible = false
+    
+    Services.TweenService:Create(mainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+        Size = UDim2.new(0, 0, 0, 0),
+        Position = UDim2.new(0.5, 0, 0.5, 0)
+    }):Play()
+    
+    Services.TweenService:Create(blurEffect, TweenInfo.new(0.3), {
+        Size = 0
+    }):Play()
+    
+    Services.TweenService:Create(floatingButton, TweenInfo.new(0.3), {
+        BackgroundColor3 = Config.AccentColor
+    }):Play()
+end)
+
+-- HOVER ЭФФЕКТЫ НА КНОПКЕ ЗАКРЫТИЯ
+closeButtonInside.MouseEnter:Connect(function()
+    Services.TweenService:Create(closeButtonInside, TweenInfo.new(0.2), {
+        BackgroundColor3 = Color3.fromRGB(220, 220, 225)
+    }):Play()
+end)
+
+closeButtonInside.MouseLeave:Connect(function()
+    Services.TweenService:Create(closeButtonInside, TweenInfo.new(0.2), {
+        BackgroundColor3 = Color3.fromRGB(230, 230, 235)
+    }):Play()
+end)
+
+-- HOVER ЭФФЕКТЫ НА ПЛАВАЮЩЕЙ КНОПКЕ
+floatingButton.MouseEnter:Connect(function()
+    Services.TweenService:Create(floatingButton, TweenInfo.new(0.2), {
+        Size = UDim2.new(0, 65, 0, 65)
+    }):Play()
+    
+    Services.TweenService:Create(shadow, TweenInfo.new(0.2), {
+        Size = UDim2.new(0, 65, 0, 65)
+    }):Play()
+end)
+
+floatingButton.MouseLeave:Connect(function()
+    Services.TweenService:Create(floatingButton, TweenInfo.new(0.2), {
+        Size = UDim2.new(0, 60, 0, 60)
+    }):Play()
+    
+    Services.TweenService:Create(shadow, TweenInfo.new(0.2), {
+        Size = UDim2.new(0, 60, 0, 60)
+    }):Play()
+end)
+
+-- TITLE BAR
 local titleBar = Instance.new("Frame")
 titleBar.Size = UDim2.new(1, 0, 0, 70)
 titleBar.BackgroundTransparency = 1
@@ -1190,7 +1428,7 @@ titleBar.Parent = mainFrame
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -40, 1, 0)
 title.Position = UDim2.new(0, 20, 0, 0)
-title.Text = "FENNIXXX Lite"
+title.Text = "FENNIXXX"
 title.TextColor3 = Color3.fromRGB(0, 0, 0)
 title.TextSize = 26
 title.Font = Enum.Font.GothamBold
@@ -1198,114 +1436,7 @@ title.BackgroundTransparency = 1
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = titleBar
 
-local resizing = false
-local resizeDirection = nil
-local resizeStart = nil
-local startSize = nil
-local startPos = nil
-
-local function createInvisibleHandle(sizeProp, posProp, cursor)
-    local handle = Instance.new("Frame")
-    handle.Size = sizeProp
-    handle.Position = posProp
-    handle.BackgroundTransparency = 1
-    handle.BorderSizePixel = 0
-    handle.Parent = mainFrame
-    handle.ZIndex = 10
-    return handle
-end
-
-local rightHandle = createInvisibleHandle(UDim2.new(0, 10, 1, 0), UDim2.new(1, -5, 0, 0))
-local leftHandle = createInvisibleHandle(UDim2.new(0, 10, 1, 0), UDim2.new(0, -5, 0, 0))
-local bottomHandle = createInvisibleHandle(UDim2.new(1, 0, 0, 10), UDim2.new(0, 0, 1, -5))
-local topHandle = createInvisibleHandle(UDim2.new(1, 0, 0, 10), UDim2.new(0, 0, 0, -5))
-local cornerBR = createInvisibleHandle(UDim2.new(0, 20, 0, 20), UDim2.new(1, -10, 1, -10))
-local cornerBL = createInvisibleHandle(UDim2.new(0, 20, 0, 20), UDim2.new(0, -10, 1, -10))
-local cornerTR = createInvisibleHandle(UDim2.new(0, 20, 0, 20), UDim2.new(1, -10, 0, -10))
-local cornerTL = createInvisibleHandle(UDim2.new(0, 20, 0, 20), UDim2.new(0, -10, 0, -10))
-
-local function setupResize(handle, direction)
-    handle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            resizing = true
-            resizeDirection = direction
-            resizeStart = Services.UserInputService:GetMouseLocation()
-            startSize = mainFrame.Size
-            startPos = mainFrame.Position
-        end
-    end)
-    
-    handle.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 and resizeDirection == direction then
-            resizing = false
-            resizeDirection = nil
-        end
-    end)
-end
-
-setupResize(rightHandle, "right")
-setupResize(leftHandle, "left")
-setupResize(bottomHandle, "bottom")
-setupResize(topHandle, "top")
-setupResize(cornerBR, "corner-br")
-setupResize(cornerBL, "corner-bl")
-setupResize(cornerTR, "corner-tr")
-setupResize(cornerTL, "corner-tl")
-
-Services.RunService.RenderStepped:Connect(function()
-    if resizing and resizeDirection then
-        local currentMouse = Services.UserInputService:GetMouseLocation()
-        local delta = currentMouse - resizeStart
-        
-        if resizeDirection == "right" then
-            local newWidth = math.clamp(startSize.X.Offset + delta.X, 500, 1200)
-            mainFrame.Size = UDim2.new(0, newWidth, 0, startSize.Y.Offset)
-            Config.GUISize.Width = newWidth
-        elseif resizeDirection == "left" then
-            local newWidth = math.clamp(startSize.X.Offset - delta.X, 500, 1200)
-            mainFrame.Size = UDim2.new(0, newWidth, 0, startSize.Y.Offset)
-            mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + (startSize.X.Offset - newWidth), startPos.Y.Scale, startPos.Y.Offset)
-            Config.GUISize.Width = newWidth
-        elseif resizeDirection == "bottom" then
-            local newHeight = math.clamp(startSize.Y.Offset + delta.Y, 500, 1200)
-            mainFrame.Size = UDim2.new(0, startSize.X.Offset, 0, newHeight)
-            Config.GUISize.Height = newHeight
-        elseif resizeDirection == "top" then
-            local newHeight = math.clamp(startSize.Y.Offset - delta.Y, 500, 1200)
-            mainFrame.Size = UDim2.new(0, startSize.X.Offset, 0, newHeight)
-            mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset, startPos.Y.Scale, startPos.Y.Offset + (startSize.Y.Offset - newHeight))
-            Config.GUISize.Height = newHeight
-        elseif resizeDirection == "corner-br" then
-            local newWidth = math.clamp(startSize.X.Offset + delta.X, 500, 1200)
-            local newHeight = math.clamp(startSize.Y.Offset + delta.Y, 500, 1200)
-            mainFrame.Size = UDim2.new(0, newWidth, 0, newHeight)
-            Config.GUISize.Width = newWidth
-            Config.GUISize.Height = newHeight
-        elseif resizeDirection == "corner-bl" then
-            local newWidth = math.clamp(startSize.X.Offset - delta.X, 500, 1200)
-            local newHeight = math.clamp(startSize.Y.Offset + delta.Y, 500, 1200)
-            mainFrame.Size = UDim2.new(0, newWidth, 0, newHeight)
-            mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + (startSize.X.Offset - newWidth), startPos.Y.Scale, startPos.Y.Offset)
-            Config.GUISize.Width = newWidth
-            Config.GUISize.Height = newHeight
-        elseif resizeDirection == "corner-tr" then
-            local newWidth = math.clamp(startSize.X.Offset + delta.X, 500, 1200)
-            local newHeight = math.clamp(startSize.Y.Offset - delta.Y, 500, 1200)
-            mainFrame.Size = UDim2.new(0, newWidth, 0, newHeight)
-            mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset, startPos.Y.Scale, startPos.Y.Offset + (startSize.Y.Offset - newHeight))
-            Config.GUISize.Width = newWidth
-            Config.GUISize.Height = newHeight
-        elseif resizeDirection == "corner-tl" then
-            local newWidth = math.clamp(startSize.X.Offset - delta.X, 500, 1200)
-            local newHeight = math.clamp(startSize.Y.Offset - delta.Y, 500, 1200)
-            mainFrame.Size = UDim2.new(0, newWidth, 0, newHeight)
-            mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + (startSize.X.Offset - newWidth), startPos.Y.Scale, startPos.Y.Offset + (startSize.Y.Offset - newHeight))
-            Config.GUISize.Width = newWidth
-            Config.GUISize.Height = newHeight
-        end
-    end
-end)
-
+-- ПЕРЕМЕЩЕНИЕ ОКНА
 local dragging = false
 local dragStart = nil
 local startPosFrame = nil
@@ -1325,7 +1456,7 @@ Services.UserInputService.InputEnded:Connect(function(input)
 end)
 
 Services.RunService.RenderStepped:Connect(function()
-    if dragging and not resizing then
+    if dragging and not isDraggingFloatingButton then
         local currentMouse = Services.UserInputService:GetMouseLocation()
         local delta = currentMouse - dragStart
         mainFrame.Position = UDim2.new(
@@ -1337,6 +1468,7 @@ Services.RunService.RenderStepped:Connect(function()
     end
 end)
 
+-- SCROLLING FRAME
 local scrollFrame = Instance.new("ScrollingFrame")
 scrollFrame.Size = UDim2.new(1, -24, 1, -90)
 scrollFrame.Position = UDim2.new(0, 12, 0, 78)
@@ -1357,9 +1489,15 @@ scrollLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     scrollFrame.CanvasSize = UDim2.new(0, 0, 0, scrollLayout.AbsoluteContentSize.Y + 20)
 end)
 
+-- ФУНКЦИИ ДЛЯ СОЗДАНИЯ UI ЭЛЕМЕНТОВ
 local function updateGUIColors(newColor)
     Config.AccentColor = newColor
     FOVCircle.Color = newColor
+    MultipointCircle.Color = newColor
+    
+    Services.TweenService:Create(floatingButton, TweenInfo.new(0.3), {
+        BackgroundColor3 = newColor
+    }):Play()
     
     for _, obj in pairs(scrollFrame:GetDescendants()) do
         if obj:IsA("TextLabel") and obj.Name == "ValueLabel" then
@@ -1631,7 +1769,7 @@ local function createCompactToggle(name, order, defaultValue, callback)
     return toggleFrame
 end
 
-local function createImprovedDropdown(name, order, options, defaultValue, callback)
+local function createDropdown(name, order, options, defaultValue, callback)
     local dropdownFrame = Instance.new("Frame")
     dropdownFrame.Size = UDim2.new(0, scrollFrame.AbsoluteSize.X - 12, 0, 52)
     dropdownFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
@@ -1670,110 +1808,39 @@ local function createImprovedDropdown(name, order, options, defaultValue, callba
     local selectedCorner = Instance.new("UICorner", selectedBtn)
     selectedCorner.CornerRadius = UDim.new(0, 10)
     
-    local arrow = Instance.new("TextLabel")
-    arrow.Size = UDim2.new(0, 20, 1, 0)
-    arrow.Position = UDim2.new(1, -25, 0, 0)
-    arrow.Text = "▼"
-    arrow.TextColor3 = Color3.fromRGB(142, 142, 147)
-    arrow.TextSize = 10
-    arrow.Font = Enum.Font.GothamBold
-    arrow.BackgroundTransparency = 1
-    arrow.Parent = selectedBtn
-    
-    local optionsFrame = Instance.new("ScrollingFrame")
-    optionsFrame.Size = UDim2.new(0, 0, 0, 0)
-    optionsFrame.Position = UDim2.new(0, 0, 0, 0)
+    local optionsFrame = Instance.new("Frame")
+    optionsFrame.Size = UDim2.new(0.6, -16, 0, 0)
+    optionsFrame.Position = UDim2.new(0.4, 0, 1, 4)
     optionsFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     optionsFrame.BorderSizePixel = 0
     optionsFrame.Visible = false
     optionsFrame.ClipsDescendants = true
-    optionsFrame.ZIndex = 1000
-    optionsFrame.ScrollBarThickness = 4
-    optionsFrame.ScrollBarImageColor3 = Color3.fromRGB(142, 142, 147)
-    optionsFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-    optionsFrame.Parent = gui
+    optionsFrame.ZIndex = 100
+    optionsFrame.Parent = dropdownFrame
     
     local optionsCorner = Instance.new("UICorner", optionsFrame)
     optionsCorner.CornerRadius = UDim.new(0, 12)
-    
-    local optionsStroke = Instance.new("UIStroke", optionsFrame)
-    optionsStroke.Color = Color3.fromRGB(210, 210, 215)
-    optionsStroke.Thickness = 1
-    optionsStroke.Transparency = 0.5
     
     local optionsLayout = Instance.new("UIListLayout", optionsFrame)
     optionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
     optionsLayout.Padding = UDim.new(0, 2)
     
-    optionsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        optionsFrame.CanvasSize = UDim2.new(0, 0, 0, optionsLayout.AbsoluteContentSize.Y + 4)
-    end)
-    
     local isOpen = false
-    
-    local function updateOptionsPosition()
-        local btnPos = selectedBtn.AbsolutePosition
-        local btnSize = selectedBtn.AbsoluteSize
-        optionsFrame.Position = UDim2.new(0, btnPos.X, 0, btnPos.Y + btnSize.Y + 4)
-        optionsFrame.Size = UDim2.new(0, btnSize.X, 0, optionsFrame.Size.Y.Offset)
-    end
     
     selectedBtn.MouseButton1Click:Connect(function()
         isOpen = not isOpen
         
         if isOpen then
-            updateOptionsPosition()
             optionsFrame.Visible = true
-            local targetHeight = math.min(#options * 38 + 4, 200)
             Services.TweenService:Create(optionsFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                Size = UDim2.new(0, selectedBtn.AbsoluteSize.X, 0, targetHeight)
-            }):Play()
-            Services.TweenService:Create(arrow, TweenInfo.new(0.2), {
-                Rotation = 180
+                Size = UDim2.new(0.6, -16, 0, #options * 38 + 4)
             }):Play()
         else
             Services.TweenService:Create(optionsFrame, TweenInfo.new(0.2), {
-                Size = UDim2.new(0, selectedBtn.AbsoluteSize.X, 0, 0)
-            }):Play()
-            Services.TweenService:Create(arrow, TweenInfo.new(0.2), {
-                Rotation = 0
+                Size = UDim2.new(0.6, -16, 0, 0)
             }):Play()
             wait(0.2)
             optionsFrame.Visible = false
-        end
-    end)
-    
-    Services.RunService.RenderStepped:Connect(function()
-        if isOpen and optionsFrame.Visible then
-            updateOptionsPosition()
-        end
-    end)
-    
-    Services.UserInputService.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 and isOpen then
-            local mousePos = Services.UserInputService:GetMouseLocation()
-            local btnPos = selectedBtn.AbsolutePosition
-            local btnSize = selectedBtn.AbsoluteSize
-            local optPos = optionsFrame.AbsolutePosition
-            local optSize = optionsFrame.AbsoluteSize
-            
-            local inButton = mousePos.X >= btnPos.X and mousePos.X <= btnPos.X + btnSize.X and
-                           mousePos.Y >= btnPos.Y and mousePos.Y <= btnPos.Y + btnSize.Y
-            
-            local inOptions = mousePos.X >= optPos.X and mousePos.X <= optPos.X + optSize.X and
-                            mousePos.Y >= optPos.Y and mousePos.Y <= optPos.Y + optSize.Y
-            
-            if not inButton and not inOptions then
-                isOpen = false
-                Services.TweenService:Create(optionsFrame, TweenInfo.new(0.2), {
-                    Size = UDim2.new(0, selectedBtn.AbsoluteSize.X, 0, 0)
-                }):Play()
-                Services.TweenService:Create(arrow, TweenInfo.new(0.2), {
-                    Rotation = 0
-                }):Play()
-                wait(0.2)
-                optionsFrame.Visible = false
-            end
         end
     end)
     
@@ -1781,29 +1848,17 @@ local function createImprovedDropdown(name, order, options, defaultValue, callba
         local optionBtn = Instance.new("TextButton")
         optionBtn.Size = UDim2.new(1, -4, 0, 36)
         optionBtn.Position = UDim2.new(0, 2, 0, 0)
-        optionBtn.BackgroundColor3 = option == defaultValue and Config.AccentColor or Color3.fromRGB(242, 242, 247)
+        optionBtn.BackgroundColor3 = option == defaultValue and Color3.fromRGB(0, 122, 255) or Color3.fromRGB(242, 242, 247)
         optionBtn.Text = option
         optionBtn.TextColor3 = option == defaultValue and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(0, 0, 0)
         optionBtn.TextSize = 13
         optionBtn.Font = Enum.Font.Gotham
         optionBtn.BorderSizePixel = 0
         optionBtn.LayoutOrder = i
-        optionBtn.ZIndex = 1001
         optionBtn.Parent = optionsFrame
         
         local optionCorner = Instance.new("UICorner", optionBtn)
         optionCorner.CornerRadius = UDim.new(0, 8)
-        
-        local checkmark = Instance.new("TextLabel")
-        checkmark.Size = UDim2.new(0, 20, 1, 0)
-        checkmark.Position = UDim2.new(1, -25, 0, 0)
-        checkmark.Text = option == defaultValue and "✓" or ""
-        checkmark.TextColor3 = Color3.fromRGB(255, 255, 255)
-        checkmark.TextSize = 16
-        checkmark.Font = Enum.Font.GothamBold
-        checkmark.BackgroundTransparency = 1
-        checkmark.ZIndex = 1002
-        checkmark.Parent = optionBtn
         
         optionBtn.MouseButton1Click:Connect(function()
             selectedBtn.Text = option
@@ -1811,14 +1866,10 @@ local function createImprovedDropdown(name, order, options, defaultValue, callba
             
             for _, btn in pairs(optionsFrame:GetChildren()) do
                 if btn:IsA("TextButton") then
-                    local check = btn:FindFirstChild("TextLabel")
                     Services.TweenService:Create(btn, TweenInfo.new(0.2), {
                         BackgroundColor3 = Color3.fromRGB(242, 242, 247),
                         TextColor3 = Color3.fromRGB(0, 0, 0)
                     }):Play()
-                    if check then
-                        check.Text = ""
-                    end
                 end
             end
             
@@ -1826,14 +1877,10 @@ local function createImprovedDropdown(name, order, options, defaultValue, callba
                 BackgroundColor3 = Config.AccentColor,
                 TextColor3 = Color3.fromRGB(255, 255, 255)
             }):Play()
-            checkmark.Text = "✓"
             
             isOpen = false
             Services.TweenService:Create(optionsFrame, TweenInfo.new(0.2), {
-                Size = UDim2.new(0, selectedBtn.AbsoluteSize.X, 0, 0)
-            }):Play()
-            Services.TweenService:Create(arrow, TweenInfo.new(0.2), {
-                Rotation = 0
+                Size = UDim2.new(0.6, -16, 0, 0)
             }):Play()
             wait(0.2)
             optionsFrame.Visible = false
@@ -2044,6 +2091,7 @@ local function createKeybindPicker(name, order, defaultKey, callback)
     return keybindFrame
 end
 
+-- КНОПКА ВЫКЛЮЧЕНИЯ
 local shutdownBtn = Instance.new("TextButton")
 shutdownBtn.Size = UDim2.new(0, scrollFrame.AbsoluteSize.X - 12, 0, 55)
 shutdownBtn.Position = UDim2.new(0, 0, 0, 0)
@@ -2065,6 +2113,18 @@ shutdownBtn.MouseButton1Click:Connect(function()
     shutdownBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 30)
     
     scriptEnabled = false
+    Config.Enabled = false
+    Config.ESP.Enabled = false
+    isSpeedEnabled = false
+    
+    FOVCircle.Visible = false
+    TargetIndicator.Visible = false
+    MultipointCircle.Visible = false
+    
+    for player, esp in pairs(ESPObjects) do
+        removeESP(player)
+    end
+    
     wait(0.5)
     
     Services.TweenService:Create(mainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
@@ -2076,41 +2136,16 @@ shutdownBtn.MouseButton1Click:Connect(function()
         Size = 0
     }):Play()
     
+    Services.TweenService:Create(floatingButton, TweenInfo.new(0.4), {
+        BackgroundColor3 = Color3.fromRGB(142, 142, 147)
+    }):Play()
+    
     wait(0.4)
     gui:Destroy()
     blurEffect:Destroy()
-    
-    -- Очистка всех подключений
-    if speedConnection then
-        speedConnection:Disconnect()
-    end
-    if rapidFireConnection then
-        rapidFireConnection:Disconnect()
-    end
-    
-    -- Удаление всех Drawing объектов
-    pcall(function() FOVCircle:Remove() end)
-    pcall(function() TargetIndicator:Remove() end)
-    
-    -- Удаление ESP объектов
-    for player, esp in pairs(ESPObjects) do
-        removeESP(player)
-    end
-    
-    -- Восстановление оригинальной скорости
-    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-        local humanoid = LocalPlayer.Character.Humanoid
-        if originalSpeeds[humanoid] then
-            humanoid.WalkSpeed = originalSpeeds[humanoid]
-        end
-    end
-    
-    print("[FENNIXXX Lite] Script successfully shut down")
 end)
 
--- ════════════════════════════════════════════════════════════════
 -- СОЗДАНИЕ UI ЭЛЕМЕНТОВ
--- ════════════════════════════════════════════════════════════════
 
 createModuleSection("Combat", 1)
 
@@ -2132,12 +2167,10 @@ end).Parent = gridContainer1
 
 createCircleButton("Team Check", 2, Config.TeamCheck, function(value)
     Config.TeamCheck = value
-    teamCheckCache = {} -- Очистка кэша при изменении
 end).Parent = gridContainer1
 
 createCircleButton("Wall Check", 3, Config.WallCheck, function(value)
     Config.WallCheck = value
-    wallCheckCache = {} -- Очистка кэша при изменении
 end).Parent = gridContainer1
 
 createCircleButton("Show FOV", 4, Config.ShowFOV, function(value)
@@ -2148,44 +2181,34 @@ createCircleButton("Resolver", 5, Config.Resolver, function(value)
     Config.Resolver = value
 end).Parent = gridContainer1
 
-createCircleButton("KO Check", 6, Config.KnockedCheck, function(value)
-    Config.KnockedCheck = value
-    knockedCache = {} -- Очистка кэша при изменении
+createCircleButton("Multipoint", 6, Config.Multipoint, function(value)
+    Config.Multipoint = value
+    if value then
+        MultipointCircle.Visible = Config.ShowFOV
+    else
+        MultipointCircle.Visible = false
+    end
 end).Parent = gridContainer1
 
--- Добавляем Visible Check в следующий ряд
-local gridContainer1_2 = Instance.new("Frame")
-gridContainer1_2.Size = UDim2.new(0, scrollFrame.AbsoluteSize.X - 12, 0, 150)
-gridContainer1_2.BackgroundTransparency = 1
-gridContainer1_2.LayoutOrder = 3
-gridContainer1_2.Parent = scrollFrame
+createModuleSection("Combat Settings", 3)
 
-local gridLayout1_2 = Instance.new("UIGridLayout")
-gridLayout1_2.CellSize = UDim2.new(0, 120, 0, 135)
-gridLayout1_2.CellPadding = UDim2.new(0, 15, 0, 15)
-gridLayout1_2.HorizontalAlignment = Enum.HorizontalAlignment.Center
-gridLayout1_2.Parent = gridContainer1_2
-
-createCircleButton("Visible Check", 1, Config.VisibleCheck, function(value)
-    Config.VisibleCheck = value
-end).Parent = gridContainer1_2
-
-createModuleSection("Combat Settings", 4)
-
-createModernSlider("FOV Size", 5, 20, 500, Config.FOVSize, function(value)
+createModernSlider("FOV Size", 4, 20, 500, Config.FOVSize, function(value)
     Config.FOVSize = value
 end, false)
 
-createModernSlider("Max Distance", 6, 100, 1000, Config.MaxDistance, function(value)
+createModernSlider("Max Distance", 5, 100, 1000, Config.MaxDistance, function(value)
     Config.MaxDistance = value
     Config.CurrentMaxDistance = value
 end, false)
 
--- УЛУЧШЕННЫЙ DROPDOWN ДЛЯ TARGET PART С ВСЕМИ ЧАСТЯМИ ТЕЛА
-createImprovedDropdown("Target Part", 7, {
-    "Closest Part",
+createModernSlider("Multipoint Size", 6, 1, 10, Config.MultipointSize, function(value)
+    Config.MultipointSize = value
+end, true)
+
+createDropdown("Target Part", 7, {
     "Head",
     "UpperTorso",
+    "Closest Point",
     "LowerTorso",
     "HumanoidRootPart",
     "LeftUpperArm",
@@ -2199,7 +2222,7 @@ createImprovedDropdown("Target Part", 7, {
     "LeftFoot",
     "RightUpperLeg",
     "RightLowerLeg",
-    "RightFoot"
+    "RightFoot",
 }, Config.HitPart, function(value)
     Config.HitPart = value
     cachedTarget = nil
@@ -2221,9 +2244,19 @@ createModernSlider("Fire Delay", 11, 0.01, 0.5, Config.RapidFireDelay, function(
     Config.RapidFireDelay = value
 end, true)
 
-createModuleSection("Walk Speed", 12)
+createModuleSection("Spread Modifier", 12)
 
-createCompactToggle("Speed Enabled", 13, isSpeedEnabled, function(value)
+createCompactToggle("Reduce Spread", 13, SpreadMod.BulletSpread.Enabled, function(value)
+    SpreadMod.BulletSpread.Enabled = value
+end)
+
+createModernSlider("Spread Amount", 14, 0, 100, SpreadMod.BulletSpread.Amount, function(value)
+    SpreadMod.BulletSpread.Amount = value
+end, false)
+
+createModuleSection("Walk Speed", 15)
+
+createCompactToggle("Speed Enabled", 16, isSpeedEnabled, function(value)
     isSpeedEnabled = value
     if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
         saveOriginalSpeed()
@@ -2231,23 +2264,23 @@ createCompactToggle("Speed Enabled", 13, isSpeedEnabled, function(value)
     end
 end)
 
-createModernSlider("Walk Speed", 14, 16, 500, currentWalkSpeed, function(value)
+createModernSlider("Walk Speed", 17, 16, 500, currentWalkSpeed, function(value)
     currentWalkSpeed = value
     if isSpeedEnabled then
         updateSpeed()
     end
 end, false)
 
-createKeybindPicker("Speed Toggle Key", 15, currentSpeedKeybind, function(key)
+createKeybindPicker("Speed Toggle Key", 18, currentSpeedKeybind, function(key)
     currentSpeedKeybind = key
 end)
 
-createModuleSection("ESP Settings", 16)
+createModuleSection("ESP Settings", 19)
 
 local gridContainer2 = Instance.new("Frame")
 gridContainer2.Size = UDim2.new(0, scrollFrame.AbsoluteSize.X - 12, 0, 290)
 gridContainer2.BackgroundTransparency = 1
-gridContainer2.LayoutOrder = 17
+gridContainer2.LayoutOrder = 20
 gridContainer2.Parent = scrollFrame
 
 local gridLayout2 = Instance.new("UIGridLayout")
@@ -2280,50 +2313,47 @@ createCircleButton("Skeleton", 6, Config.ESP.ShowSkeleton, function(value)
     Config.ESP.ShowSkeleton = value
 end).Parent = gridContainer2
 
-createModuleSection("ESP Colors", 18)
+createModuleSection("ESP Colors", 21)
 
-createColorPicker("Box Color", 19, Config.ESP.BoxColor, function(color)
+createColorPicker("Box Color", 22, Config.ESP.BoxColor, function(color)
     Config.ESP.BoxColor = color
 end, true)
 
-createColorPicker("Name Color", 20, Config.ESP.NameColor, function(color)
+createColorPicker("Name Color", 23, Config.ESP.NameColor, function(color)
     Config.ESP.NameColor = color
 end, true)
 
-createColorPicker("Distance Color", 21, Config.ESP.DistanceColor, function(color)
+createColorPicker("Distance Color", 24, Config.ESP.DistanceColor, function(color)
     Config.ESP.DistanceColor = color
 end, true)
 
-createColorPicker("Skeleton Color", 22, Config.ESP.SkeletonColor, function(color)
+createColorPicker("Skeleton Color", 25, Config.ESP.SkeletonColor, function(color)
     Config.ESP.SkeletonColor = color
 end, true)
 
-createModernSlider("ESP Distance", 23, 100, 1000, Config.ESP.MaxDistance, function(value)
+createModernSlider("ESP Distance", 26, 100, 1000, Config.ESP.MaxDistance, function(value)
     Config.ESP.MaxDistance = value
 end, false)
 
-createCompactToggle("ESP Team Check", 24, Config.ESP.TeamCheck, function(value)
+createCompactToggle("ESP Team Check", 27, Config.ESP.TeamCheck, function(value)
     Config.ESP.TeamCheck = value
 end)
 
-createModuleSection("GUI Settings", 25)
+createModuleSection("GUI Settings", 28)
 
-createColorPicker("GUI Accent Color", 26, Config.AccentColor, function(color)
+createColorPicker("GUI Accent Color", 29, Config.AccentColor, function(color)
     updateGUIColors(color)
 end, false)
 
-createKeybindPicker("Toggle GUI", 27, Config.GUIToggleKey, function(key)
+createKeybindPicker("Toggle GUI", 30, Config.GUIToggleKey, function(key)
     Config.GUIToggleKey = key
 end)
 
-createCompactToggle("Show Targeting", 28, Config.ShowTargeting, function(value)
+createCompactToggle("Show Targeting", 31, Config.ShowTargeting, function(value)
     Config.ShowTargeting = value
 end)
 
--- ════════════════════════════════════════════════════════════════
--- GUI TOGGLE LOGIC
--- ════════════════════════════════════════════════════════════════
-
+-- ГОРЯЧАЯ КЛАВИША ДЛЯ ОТКРЫТИЯ/ЗАКРЫТИЯ ГУИ
 Services.UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
     if input.KeyCode == Config.GUIToggleKey then
@@ -2341,6 +2371,10 @@ Services.UserInputService.InputBegan:Connect(function(input, processed)
             Services.TweenService:Create(blurEffect, TweenInfo.new(0.3), {
                 Size = 15
             }):Play()
+            
+            Services.TweenService:Create(floatingButton, TweenInfo.new(0.3), {
+                BackgroundColor3 = Color3.fromRGB(142, 142, 147)
+            }):Play()
         else
             Services.TweenService:Create(mainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
                 Size = UDim2.new(0, 0, 0, 0),
@@ -2350,13 +2384,13 @@ Services.UserInputService.InputBegan:Connect(function(input, processed)
             Services.TweenService:Create(blurEffect, TweenInfo.new(0.3), {
                 Size = 0
             }):Play()
+            
+            Services.TweenService:Create(floatingButton, TweenInfo.new(0.3), {
+                BackgroundColor3 = Config.AccentColor
+            }):Play()
         end
     end
 end)
-
--- ════════════════════════════════════════════════════════════════
--- INITIAL GUI ANIMATION
--- ════════════════════════════════════════════════════════════════
 
 wait(0.5)
 mainFrame.Visible = true
@@ -2371,10 +2405,6 @@ Services.TweenService:Create(mainFrame, TweenInfo.new(0.6, Enum.EasingStyle.Back
 Services.TweenService:Create(blurEffect, TweenInfo.new(0.4), {
     Size = 15
 }):Play()
-
-print("[FENNIXXX Lite] Successfully loaded!")
-print("[FENNIXXX Lite] Press " .. Config.GUIToggleKey.Name .. " to toggle GUI")
-print("[FENNIXXX Lite] KO Check and Visible Check are now available in Combat section")
 
 end
 
