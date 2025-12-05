@@ -5,8 +5,10 @@
      ██╔══╝  ██╔══╝  ██║╚██╔╝██║██║╚██╗██║██║ ██╔██╗  ██╔██╗  ██╔██╗
      ██║     ███████╗██║ ╚═╝ ██║██║ ╚████║██║██╔╝ ██╗██╔╝ ██╗██╔╝ ██╗
      ╚═╝     ╚══════╝╚═╝     ╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝
-           iOS 18 CONTROL CENTER STYLE - COLLAPSIBLE GUI WITH FLOATING BUTTON
+     
+     iOS 18 CONTROL CENTER - RESIZABLE GUI WITH PROPER SHUTDOWN
      Made with ❤ by FENNIXXX Team
+     Version 2.0 - Enhanced Edition
 ]]
 
 -- ════════════════════════════════════════════════════════════════
@@ -21,7 +23,6 @@ local newcclosure = newcclosure or protect_function or function(f) return f end
 local setreadonly = setreadonly or make_writeable or function() end
 local checkcaller = checkcaller or is_caller or function() return false end
 
--- Проверка наличия критических функций
 if not request then
     game:GetService("StarterGui"):SetCore("SendNotification", {
         Title = "FENNIXXX Error";
@@ -63,11 +64,9 @@ local Camera = workspace.CurrentCamera
 local KeyAuthApp = "FENNIXXX"
 local KeyAuthOwnerIDs = {
     "Gi9EhXEQsn",
-    -- Добавляйте дополнительные OwnerID сюда:
     "B05VCYnbf0",
     "6oOmPZgEug",
     "edcEgR58Gp",
-    "Gi9EhXEQsn"
 }
 local KeyAuthVersion = "1.0"
 local KeyAuthURL = "https://keyauth.win/api/1.2/"
@@ -76,6 +75,52 @@ local isAuthorized = false
 local sessionID = ""
 local scriptEnabled = true
 local currentOwnerID = nil
+
+-- GLOBAL CLEANUP TABLE
+local GlobalCleanup = {
+    Connections = {},
+    Drawings = {},
+    Instances = {},
+    Hooks = {}
+}
+
+local function addToCleanup(category, item)
+    table.insert(GlobalCleanup[category], item)
+end
+
+local function performFullCleanup()
+    -- Disconnect all connections
+    for _, connection in pairs(GlobalCleanup.Connections) do
+        pcall(function()
+            if connection and connection.Disconnect then
+                connection:Disconnect()
+            end
+        end)
+    end
+    
+    -- Remove all drawings
+    for _, drawing in pairs(GlobalCleanup.Drawings) do
+        pcall(function()
+            if drawing and drawing.Remove then
+                drawing:Remove()
+            end
+        end)
+    end
+    
+    -- Destroy all instances
+    for _, instance in pairs(GlobalCleanup.Instances) do
+        pcall(function()
+            if instance and instance.Destroy then
+                instance:Destroy()
+            end
+        end)
+    end
+    
+    -- Clear tables
+    GlobalCleanup.Connections = {}
+    GlobalCleanup.Drawings = {}
+    GlobalCleanup.Instances = {}
+end
 
 local function getHWID()
     local success, hwid = pcall(function()
@@ -88,7 +133,6 @@ local function getHWID()
     end
 end
 
--- Инициализация KeyAuth для конкретного OwnerID
 local function initKeyAuth(ownerID)
     local success, response = pcall(function()
         return request({
@@ -124,73 +168,6 @@ local function initKeyAuth(ownerID)
     end
 end
 
--- Попытка инициализации со всеми OwnerID
-local function initializeWithAnyOwner()
-    for _, ownerID in ipairs(KeyAuthOwnerIDs) do
-        local success, message, sid = initKeyAuth(ownerID)
-        if success and sid then
-            sessionID = sid
-            currentOwnerID = ownerID
-            return true, "Initialized with owner: " .. ownerID
-        end
-        wait(0.3)
-    end
-    return false, "Failed to initialize with any owner"
-end
-
--- ВАРИАНТ 1: Последовательная проверка (пробует каждый OwnerID по очереди)
-local function verifyLicenseSequential(key)
-    local hwid = getHWID()
-    
-    for _, ownerID in ipairs(KeyAuthOwnerIDs) do
-        -- Инициализируем для каждого OwnerID
-        local initSuccess, initMsg, sid = initKeyAuth(ownerID)
-        if initSuccess and sid then
-            wait(0.3)
-            
-            local success, response = pcall(function()
-                return request({
-                    Url = KeyAuthURL,
-                    Method = "POST",
-                    Headers = {
-                        ["Content-Type"] = "application/x-www-form-urlencoded"
-                    },
-                    Body = "type=license&key=" .. Services.HttpService:UrlEncode(key) ..
-                           "&sessionid=" .. sid ..
-                           "&name=" .. KeyAuthApp ..
-                           "&ownerid=" .. ownerID ..
-                           "&hwid=" .. hwid
-                })
-            end)
-            
-            if success and response.StatusCode == 200 then
-                local decodeSuccess, data = pcall(function()
-                    return Services.HttpService:JSONDecode(response.Body)
-                end)
-                
-                if decodeSuccess and data.success then
-                    sessionID = sid
-                    currentOwnerID = ownerID
-                    
-                    local exp = "Lifetime"
-                    if data.info and data.info.subscriptions then
-                        for _, sub in pairs(data.info.subscriptions) do
-                            if sub.expiry and sub.expiry ~= "lifetime" then
-                                exp = os.date("%m/%d/%Y %H:%M", tonumber(sub.expiry))
-                            end
-                        end
-                    end
-                    return true, "License verified! (Owner: " .. ownerID:sub(1,6) .. "...) Expires: " .. exp
-                end
-            end
-        end
-        wait(0.2)
-    end
-    
-    return false, "Invalid license key or all owners failed"
-end
-
--- ВАРИАНТ 2: Параллельная проверка (пробует все OwnerID одновременно)
 local function verifyLicenseParallel(key)
     local hwid = getHWID()
     local results = {}
@@ -243,13 +220,11 @@ local function verifyLicenseParallel(key)
         end)
     end
     
-    -- Ждем завершения всех запросов (максимум 10 секунд)
     local startTime = tick()
     while completed < totalOwners and (tick() - startTime) < 10 do
         wait(0.1)
     end
     
-    -- Проверяем результаты
     for index, result in pairs(results) do
         if result.success then
             sessionID = result.sessionID
@@ -263,80 +238,11 @@ local function verifyLicenseParallel(key)
                     end
                 end
             end
-            return true, "License verified! (Owner: " .. result.ownerID:sub(1,6) .. "...) Expires: " .. exp
+            return true, "License verified! Expires: " .. exp
         end
     end
     
     return false, "Invalid license key or all owners failed"
-end
-
--- ВАРИАНТ 3: С повторными попытками и задержками
-local function verifyLicenseWithRetry(key, maxRetries)
-    maxRetries = maxRetries or 2
-    local hwid = getHWID()
-    
-    for _, ownerID in ipairs(KeyAuthOwnerIDs) do
-        for retry = 1, maxRetries do
-            local initSuccess, initMsg, sid = initKeyAuth(ownerID)
-            if initSuccess and sid then
-                wait(0.3)
-                
-                local success, response = pcall(function()
-                    return request({
-                        Url = KeyAuthURL,
-                        Method = "POST",
-                        Headers = {
-                            ["Content-Type"] = "application/x-www-form-urlencoded"
-                        },
-                        Body = "type=license&key=" .. Services.HttpService:UrlEncode(key) ..
-                               "&sessionid=" .. sid ..
-                               "&name=" .. KeyAuthApp ..
-                               "&ownerid=" .. ownerID ..
-                               "&hwid=" .. hwid
-                })
-                end)
-                
-                if success and response.StatusCode == 200 then
-                    local decodeSuccess, data = pcall(function()
-                        return Services.HttpService:JSONDecode(response.Body)
-                    end)
-                    
-                    if decodeSuccess and data.success then
-                        sessionID = sid
-                        currentOwnerID = ownerID
-                        
-                        local exp = "Lifetime"
-                        if data.info and data.info.subscriptions then
-                            for _, sub in pairs(data.info.subscriptions) do
-                                if sub.expiry and sub.expiry ~= "lifetime" then
-                                    exp = os.date("%m/%d/%Y %H:%M", tonumber(sub.expiry))
-                                end
-                            end
-                        end
-                        return true, "License verified! (Owner: " .. ownerID:sub(1,6) .. "..., Try: " .. retry .. ") Expires: " .. exp
-                    end
-                end
-                
-                if retry < maxRetries then
-                    wait(0.5)
-                end
-            end
-        end
-    end
-    
-    return false, "Invalid license key or all attempts failed"
-end
-
--- Выбор метода проверки (можно изменить)
-local function verifyLicense(key)
-    -- Используем ВАРИАНТ 1 (последовательная проверка)
-    -- return verifyLicenseSequential(key)
-    
-    -- Используем ВАРИАНТ 2 (параллельная проверка - быстрее)
-    return verifyLicenseParallel(key)
-    
-    -- Используем ВАРИАНТ 3 (с повторными попытками)
-    -- return verifyLicenseWithRetry(key, 2)
 end
 
 local function createAuthGUI()
@@ -352,6 +258,8 @@ local function createAuthGUI()
     if not authGui.Parent then
         authGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
     end
+    
+    addToCleanup("Instances", authGui)
     
     local darkBackground = Instance.new("Frame")
     darkBackground.Size = UDim2.new(1, 0, 1, 0)
@@ -424,7 +332,7 @@ local function createAuthGUI()
     local copyCorner = Instance.new("UICorner", copyHWIDBtn)
     copyCorner.CornerRadius = UDim.new(0, 8)
     
-    copyHWIDBtn.MouseButton1Click:Connect(function()
+    local copyConnection = copyHWIDBtn.MouseButton1Click:Connect(function()
         setclipboard(getHWID())
         copyHWIDBtn.Text = "Copied!"
         copyHWIDBtn.BackgroundColor3 = Color3.fromRGB(52, 199, 89)
@@ -432,6 +340,7 @@ local function createAuthGUI()
         copyHWIDBtn.Text = "Copy"
         copyHWIDBtn.BackgroundColor3 = Color3.fromRGB(0, 122, 255)
     end)
+    addToCleanup("Connections", copyConnection)
     
     local keyBox = Instance.new("TextBox")
     keyBox.Size = UDim2.new(0, 330, 0, 45)
@@ -457,18 +366,6 @@ local function createAuthGUI()
     local keyBoxPadding = Instance.new("UIPadding", keyBox)
     keyBoxPadding.PaddingLeft = UDim.new(0, 15)
     keyBoxPadding.PaddingRight = UDim.new(0, 15)
-    
-    keyBox.Focused:Connect(function()
-        Services.TweenService:Create(keyBox, TweenInfo.new(0.2), {
-            BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        }):Play()
-    end)
-    
-    keyBox.FocusLost:Connect(function()
-        Services.TweenService:Create(keyBox, TweenInfo.new(0.2), {
-            BackgroundColor3 = Color3.fromRGB(242, 242, 247)
-        }):Play()
-    end)
     
     local submitBtn = Instance.new("TextButton")
     submitBtn.Size = UDim2.new(0, 330, 0, 45)
@@ -510,7 +407,7 @@ local function createAuthGUI()
     local getKeyCorner = Instance.new("UICorner", getKeyBtn)
     getKeyCorner.CornerRadius = UDim.new(0, 12)
     
-    getKeyBtn.MouseButton1Click:Connect(function()
+    local getKeyConnection = getKeyBtn.MouseButton1Click:Connect(function()
         setclipboard("https://keyauth.win/panel/" .. KeyAuthApp .. "/licenses")
         getKeyBtn.Text = "Link Copied!"
         getKeyBtn.BackgroundColor3 = Color3.fromRGB(52, 199, 89)
@@ -520,6 +417,7 @@ local function createAuthGUI()
         getKeyBtn.BackgroundColor3 = Color3.fromRGB(242, 242, 247)
         getKeyBtn.TextColor3 = Color3.fromRGB(0, 122, 255)
     end)
+    addToCleanup("Connections", getKeyConnection)
     
     local function verifyKey()
         local key = keyBox.Text
@@ -543,7 +441,7 @@ local function createAuthGUI()
         statusLabel.TextColor3 = Color3.fromRGB(0, 122, 255)
         statusLabel.Text = "Verifying license..."
         
-        local success, message = verifyLicense(key)
+        local success, message = verifyLicenseParallel(key)
         
         if success then
             isAuthorized = true
@@ -584,12 +482,15 @@ local function createAuthGUI()
         end
     end
     
-    submitBtn.MouseButton1Click:Connect(verifyKey)
-    keyBox.FocusLost:Connect(function(enterPressed)
+    local submitConnection = submitBtn.MouseButton1Click:Connect(verifyKey)
+    addToCleanup("Connections", submitConnection)
+    
+    local focusConnection = keyBox.FocusLost:Connect(function(enterPressed)
         if enterPressed then
             verifyKey()
         end
     end)
+    addToCleanup("Connections", focusConnection)
     
     authFrame.Size = UDim2.new(0, 0, 0, 0)
     authFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -637,18 +538,20 @@ local function setupWalkSpeed()
     saveOriginalSpeed()
     updateSpeed()
     
-    LocalPlayer.CharacterAdded:Connect(function(character)
+    local charAddedConnection = LocalPlayer.CharacterAdded:Connect(function(character)
         character:WaitForChild("Humanoid")
         wait(0.1)
         saveOriginalSpeed()
         updateSpeed()
     end)
+    addToCleanup("Connections", charAddedConnection)
     
     speedConnection = Services.RunService.Heartbeat:Connect(function()
         if isSpeedEnabled then
             updateSpeed()
         end
     end)
+    addToCleanup("Connections", speedConnection)
 end
 
 function initializeScript()
@@ -756,6 +659,7 @@ FOVCircle.Color = Color3.fromRGB(0, 122, 255)
 FOVCircle.Transparency = 1
 FOVCircle.NumSides = 24
 FOVCircle.Filled = false
+addToCleanup("Drawings", FOVCircle)
 
 local TargetIndicator = Drawing.new("Circle")
 TargetIndicator.Visible = false
@@ -765,6 +669,7 @@ TargetIndicator.Transparency = 1
 TargetIndicator.NumSides = 16
 TargetIndicator.Radius = 8
 TargetIndicator.Filled = false
+addToCleanup("Drawings", TargetIndicator)
 
 local MultipointCircle = Drawing.new("Circle")
 MultipointCircle.Visible = false
@@ -774,6 +679,7 @@ MultipointCircle.Transparency = 0.5
 MultipointCircle.NumSides = 12
 MultipointCircle.Radius = 5
 MultipointCircle.Filled = false
+addToCleanup("Drawings", MultipointCircle)
 
 local cachedTarget = nil
 local cachedTargetPoint = nil
@@ -810,33 +716,39 @@ local function createESP(player)
         line.Thickness = 2
         line.Transparency = 1
         table.insert(esp.SkeletonLines, line)
+        addToCleanup("Drawings", line)
     end
     
     esp.Box.Visible = false
     esp.Box.Thickness = 2
     esp.Box.Filled = false
     esp.Box.Transparency = 1
+    addToCleanup("Drawings", esp.Box)
     
     esp.Name.Visible = false
     esp.Name.Center = true
     esp.Name.Outline = true
     esp.Name.Size = 14
     esp.Name.Font = 2
+    addToCleanup("Drawings", esp.Name)
     
     esp.Distance.Visible = false
     esp.Distance.Center = true
     esp.Distance.Outline = true
     esp.Distance.Size = 13
     esp.Distance.Font = 2
+    addToCleanup("Drawings", esp.Distance)
     
     esp.HealthBar.Visible = false
     esp.HealthBar.Filled = true
     esp.HealthBar.Thickness = 1
+    addToCleanup("Drawings", esp.HealthBar)
     
     esp.HealthBarOutline.Visible = false
     esp.HealthBarOutline.Filled = false
     esp.HealthBarOutline.Thickness = 1
     esp.HealthBarOutline.Color = Color3.fromRGB(0, 0, 0)
+    addToCleanup("Drawings", esp.HealthBarOutline)
     
     ESPObjects[player] = esp
 end
@@ -1026,13 +938,15 @@ local function updateESP()
     end
 end
 
-Services.Players.PlayerAdded:Connect(function(player)
+local playerAddedConnection = Services.Players.PlayerAdded:Connect(function(player)
     createESP(player)
 end)
+addToCleanup("Connections", playerAddedConnection)
 
-Services.Players.PlayerRemoving:Connect(function(player)
+local playerRemovingConnection = Services.Players.PlayerRemoving:Connect(function(player)
     removeESP(player)
 end)
+addToCleanup("Connections", playerRemovingConnection)
 
 for _, player in ipairs(Services.Players:GetPlayers()) do
     if player ~= LocalPlayer then
@@ -1121,18 +1035,6 @@ local function isKnocked(player)
            state == Enum.HumanoidStateType.PlatformStanding then
             knockedCache[cacheKey] = {result = true, time = now}
             return true
-        end
-    end
-    
-    local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
-    if animator then
-        local tracks = animator:GetPlayingAnimationTracks()
-        for _, track in ipairs(tracks) do
-            local animName = track.Animation.AnimationId:lower()
-            if animName:find("ko") or animName:find("knocked") or animName:find("down") then
-                knockedCache[cacheKey] = {result = true, time = now}
-                return true
-            end
         end
     end
     
@@ -1340,7 +1242,7 @@ end
 local uiUpdateCounter = 0
 local UI_UPDATE_RATE = 1
 
-Services.RunService.RenderStepped:Connect(function()
+local renderSteppedConnection = Services.RunService.RenderStepped:Connect(function()
     if not scriptEnabled then return end
     
     mouseLocation = Services.UserInputService:GetMouseLocation()
@@ -1380,8 +1282,9 @@ Services.RunService.RenderStepped:Connect(function()
     
     updateESP()
 end)
+addToCleanup("Connections", renderSteppedConnection)
 
-Services.UserInputService.InputBegan:Connect(function(input, processed)
+local inputBeganConnection = Services.UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
     if input.KeyCode == Config.Keybind then
         Config.Enabled = not Config.Enabled
@@ -1392,8 +1295,8 @@ Services.UserInputService.InputBegan:Connect(function(input, processed)
         updateSpeed()
     end
 end)
+addToCleanup("Connections", inputBeganConnection)
 
--- МЕТАТАБЛИЦА ДЛЯ SILENT AIM
 pcall(function()
     if not getrawmetatable or not hookfunction then return end
     
@@ -1413,10 +1316,11 @@ pcall(function()
     setreadonly(mt, true)
 end)
 
-Services.RunService.RenderStepped:Connect(function()
+local targetUpdateConnection = Services.RunService.RenderStepped:Connect(function()
     if not Config.Enabled or not scriptEnabled then return end
     updateTarget()
 end)
+addToCleanup("Connections", targetUpdateConnection)
 
 local function setupRapidFire()
     if rapidFireConnection then
@@ -1448,11 +1352,11 @@ local function setupRapidFire()
             end
         end
     end)
+    addToCleanup("Connections", rapidFireConnection)
 end
 
 setupRapidFire()
 
--- BULLET SPREAD MODIFIER
 pcall(function()
     if not hookfunction then return end
     
@@ -1469,15 +1373,16 @@ pcall(function()
     end)
 end)
 
-Services.Players.PlayerRemoving:Connect(function(player)
+local playerRemovingConnection2 = Services.Players.PlayerRemoving:Connect(function(player)
     teamCheckCache[player.UserId] = nil
     knockedCache[player.UserId] = nil
 end)
+addToCleanup("Connections", playerRemovingConnection2)
 
 setupWalkSpeed()
 
 -- ════════════════════════════════════════════════════════════════
--- iOS 18 COLLAPSIBLE CONTROL CENTER STYLE GUI WITH FLOATING BUTTON
+-- iOS 18 RESIZABLE GUI WITH PROPER SHUTDOWN
 -- ════════════════════════════════════════════════════════════════
 
 local gui = Instance.new("ScreenGui")
@@ -1493,9 +1398,12 @@ if not gui.Parent then
     gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 end
 
+addToCleanup("Instances", gui)
+
 local blurEffect = Instance.new("BlurEffect")
 blurEffect.Size = 0
 blurEffect.Parent = game:GetService("Lighting")
+addToCleanup("Instances", blurEffect)
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0, Config.GUISize.Width, 0, Config.GUISize.Height)
@@ -1516,23 +1424,23 @@ mainStroke.Color = Color3.fromRGB(210, 210, 215)
 mainStroke.Thickness = 3
 mainStroke.Transparency = 0.3
 
--- АНИМАЦИЯ ПЕРЕЛИВАЮЩИХСЯ ЦВЕТОВ ДЛЯ КРАЁВ GUI
+-- RAINBOW BORDER ANIMATION
 local rainbowColors = {
-    Color3.fromRGB(255, 0, 0),      -- Красный
-    Color3.fromRGB(255, 127, 0),    -- Оранжевый
-    Color3.fromRGB(255, 255, 0),    -- Жёлтый
-    Color3.fromRGB(0, 255, 0),      -- Зелёный
-    Color3.fromRGB(0, 127, 255),    -- Голубой
-    Color3.fromRGB(0, 0, 255),      -- Синий
-    Color3.fromRGB(139, 0, 255),    -- Фиолетовый
-    Color3.fromRGB(255, 0, 255),    -- Пурпурный
+    Color3.fromRGB(255, 0, 0),
+    Color3.fromRGB(255, 127, 0),
+    Color3.fromRGB(255, 255, 0),
+    Color3.fromRGB(0, 255, 0),
+    Color3.fromRGB(0, 127, 255),
+    Color3.fromRGB(0, 0, 255),
+    Color3.fromRGB(139, 0, 255),
+    Color3.fromRGB(255, 0, 255),
 }
 
 local currentColorIndex = 1
 local colorTransitionTime = 0
 
 spawn(function()
-    while wait() do
+    while wait() and scriptEnabled do
         if mainFrame.Parent then
             colorTransitionTime = colorTransitionTime + 0.02
             
@@ -1549,6 +1457,159 @@ spawn(function()
         end
     end
 end)
+
+-- RESIZABLE EDGES
+local resizeHandles = {}
+local resizing = false
+local resizeDirection = ""
+local resizeStart = Vector2.new(0, 0)
+local originalSize = mainFrame.Size
+local originalPosition = mainFrame.Position
+local minSize = Vector2.new(400, 500)
+local maxSize = Vector2.new(1200, 1000)
+
+local handlePositions = {
+    {name = "Right", size = UDim2.new(0, 8, 1, -60), position = UDim2.new(1, -4, 0, 30), cursor = "rbxasset://SystemCursors/SizeEW"},
+    {name = "Left", size = UDim2.new(0, 8, 1, -60), position = UDim2.new(0, -4, 0, 30), cursor = "rbxasset://SystemCursors/SizeEW"},
+    {name = "Bottom", size = UDim2.new(1, -60, 0, 8), position = UDim2.new(0, 30, 1, -4), cursor = "rbxasset://SystemCursors/SizeNS"},
+    {name = "Top", size = UDim2.new(1, -60, 0, 8), position = UDim2.new(0, 30, 0, -4), cursor = "rbxasset://SystemCursors/SizeNS"},
+    {name = "BottomRight", size = UDim2.new(0, 16, 0, 16), position = UDim2.new(1, -8, 1, -8), cursor = "rbxasset://SystemCursors/SizeNWSE"},
+    {name = "BottomLeft", size = UDim2.new(0, 16, 0, 16), position = UDim2.new(0, -8, 1, -8), cursor = "rbxasset://SystemCursors/SizeNESW"},
+    {name = "TopRight", size = UDim2.new(0, 16, 0, 16), position = UDim2.new(1, -8, 0, -8), cursor = "rbxasset://SystemCursors/SizeNESW"},
+    {name = "TopLeft", size = UDim2.new(0, 16, 0, 16), position = UDim2.new(0, -8, 0, -8), cursor = "rbxasset://SystemCursors/SizeNWSE"},
+}
+
+for _, handleData in ipairs(handlePositions) do
+    local handle = Instance.new("TextButton")
+    handle.Name = handleData.name .. "Handle"
+    handle.Size = handleData.size
+    handle.Position = handleData.position
+    handle.BackgroundTransparency = 1
+    handle.Text = ""
+    handle.ZIndex = 150
+    handle.Parent = mainFrame
+    
+    local handleConnection1 = handle.MouseEnter:Connect(function()
+        Services.UserInputService.MouseIcon = handleData.cursor
+    end)
+    addToCleanup("Connections", handleConnection1)
+    
+    local handleConnection2 = handle.MouseLeave:Connect(function()
+        if not resizing then
+            Services.UserInputService.MouseIcon = ""
+        end
+    end)
+    addToCleanup("Connections", handleConnection2)
+    
+    local handleConnection3 = handle.MouseButton1Down:Connect(function()
+        resizing = true
+        resizeDirection = handleData.name
+        resizeStart = Services.UserInputService:GetMouseLocation()
+        originalSize = mainFrame.Size
+        originalPosition = mainFrame.Position
+    end)
+    addToCleanup("Connections", handleConnection3)
+    
+    resizeHandles[handleData.name] = handle
+end
+
+local resizeConnection = Services.UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        resizing = false
+        resizeDirection = ""
+        Services.UserInputService.MouseIcon = ""
+    end
+end)
+addToCleanup("Connections", resizeConnection)
+
+local resizeUpdateConnection = Services.RunService.RenderStepped:Connect(function()
+    if resizing and resizeDirection ~= "" then
+        local currentMouse = Services.UserInputService:GetMouseLocation()
+        local delta = currentMouse - resizeStart
+        
+        local newWidth = originalSize.X.Offset
+        local newHeight = originalSize.Y.Offset
+        local newX = originalPosition.X.Offset
+        local newY = originalPosition.Y.Offset
+        
+        if resizeDirection:find("Right") then
+            newWidth = math.clamp(originalSize.X.Offset + delta.X, minSize.X, maxSize.X)
+        end
+        
+        if resizeDirection:find("Left") then
+            local proposedWidth = originalSize.X.Offset - delta.X
+            if proposedWidth >= minSize.X and proposedWidth <= maxSize.X then
+                newWidth = proposedWidth
+                newX = originalPosition.X.Offset + delta.X
+            end
+        end
+        
+        if resizeDirection:find("Bottom") then
+            newHeight = math.clamp(originalSize.Y.Offset + delta.Y, minSize.Y, maxSize.Y)
+        end
+        
+        if resizeDirection:find("Top") then
+            local proposedHeight = originalSize.Y.Offset - delta.Y
+            if proposedHeight >= minSize.Y and proposedHeight <= maxSize.Y then
+                newHeight = proposedHeight
+                newY = originalPosition.Y.Offset + delta.Y
+            end
+        end
+        
+        mainFrame.Size = UDim2.new(0, newWidth, 0, newHeight)
+        mainFrame.Position = UDim2.new(originalPosition.X.Scale, newX, originalPosition.Y.Scale, newY)
+        
+        Config.GUISize.Width = newWidth
+        Config.GUISize.Height = newHeight
+        
+        if scrollFrame then
+            scrollFrame.Size = UDim2.new(1, -24, 1, -90)
+        end
+    end
+end)
+addToCleanup("Connections", resizeUpdateConnection)
+
+-- DRAG FUNCTIONALITY
+local dragging = false
+local dragStart = Vector2.new(0, 0)
+local startPos = UDim2.new(0, 0, 0, 0)
+
+local dragButton = Instance.new("TextButton")
+dragButton.Size = UDim2.new(1, -120, 0, 60)
+dragButton.Position = UDim2.new(0, 0, 0, 0)
+dragButton.BackgroundTransparency = 1
+dragButton.Text = ""
+dragButton.ZIndex = 10
+dragButton.Parent = mainFrame
+
+local dragConnection1 = dragButton.MouseButton1Down:Connect(function()
+    dragging = true
+    dragStart = Services.UserInputService:GetMouseLocation()
+    startPos = mainFrame.Position
+end)
+addToCleanup("Connections", dragConnection1)
+
+local dragConnection2 = Services.UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+addToCleanup("Connections", dragConnection2)
+
+local dragUpdateConnection = Services.RunService.RenderStepped:Connect(function()
+    if dragging then
+        local currentMouse = Services.UserInputService:GetMouseLocation()
+        local delta = currentMouse - dragStart
+        
+        mainFrame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+addToCleanup("Connections", dragUpdateConnection)
 
 local closeButtonInside = Instance.new("TextButton")
 closeButtonInside.Size = UDim2.new(0, 45, 0, 45)
@@ -1570,6 +1631,15 @@ closeStrokeInside.Color = Color3.fromRGB(210, 210, 215)
 closeStrokeInside.Thickness = 1
 closeStrokeInside.Transparency = 0.5
 
+local closeConnection = closeButtonInside.MouseButton1Click:Connect(function()
+    mainFrame.Visible = false
+    
+    Services.TweenService:Create(blurEffect, TweenInfo.new(0.3), {
+        Size = 0
+    }):Play()
+end)
+addToCleanup("Connections", closeConnection)
+
 local scrollFrame = Instance.new("ScrollingFrame")
 scrollFrame.Size = UDim2.new(1, -24, 1, -90)
 scrollFrame.Position = UDim2.new(0, 12, 0, 78)
@@ -1586,18 +1656,15 @@ scrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
 scrollLayout.Padding = UDim.new(0, 12)
 scrollLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
-scrollLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+local scrollLayoutConnection = scrollLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     scrollFrame.CanvasSize = UDim2.new(0, 0, 0, scrollLayout.AbsoluteContentSize.Y + 20)
 end)
+addToCleanup("Connections", scrollLayoutConnection)
 
 local function updateGUIColors(newColor)
     Config.AccentColor = newColor
     FOVCircle.Color = newColor
     MultipointCircle.Color = newColor
-    
-    Services.TweenService:Create(floatingButton, TweenInfo.new(0.3), {
-        BackgroundColor3 = newColor
-    }):Play()
     
     for _, obj in pairs(scrollFrame:GetDescendants()) do
         if obj:IsA("TextLabel") and obj.Name == "ValueLabel" then
@@ -1665,7 +1732,7 @@ local function createCircleButton(name, order, defaultValue, callback)
     
     local enabled = defaultValue
     
-    button.MouseButton1Click:Connect(function()
+    local btnConnection = button.MouseButton1Click:Connect(function()
         enabled = not enabled
         
         Services.TweenService:Create(button, TweenInfo.new(0.25), {
@@ -1682,6 +1749,7 @@ local function createCircleButton(name, order, defaultValue, callback)
         
         callback(enabled)
     end)
+    addToCleanup("Connections", btnConnection)
     
     return container, button
 end
@@ -1771,19 +1839,21 @@ local function createModernSlider(name, order, min, max, defaultValue, callback,
     sliderFillCorner.CornerRadius = UDim.new(1, 0)
     
     local dragging = false
-    sliderBg.InputBegan:Connect(function(input)
+    local sliderConnection1 = sliderBg.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
         end
     end)
+    addToCleanup("Connections", sliderConnection1)
     
-    Services.UserInputService.InputEnded:Connect(function(input)
+    local sliderConnection2 = Services.UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = false
         end
     end)
+    addToCleanup("Connections", sliderConnection2)
     
-    Services.RunService.RenderStepped:Connect(function()
+    local sliderConnection3 = Services.RunService.RenderStepped:Connect(function()
         if dragging then
             local mousePos = Services.UserInputService:GetMouseLocation()
             local relX = math.clamp((mousePos.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
@@ -1801,6 +1871,7 @@ local function createModernSlider(name, order, min, max, defaultValue, callback,
             callback(value)
         end
     end)
+    addToCleanup("Connections", sliderConnection3)
     
     return sliderFrame
 end
@@ -1852,7 +1923,7 @@ local function createCompactToggle(name, order, defaultValue, callback)
     
     local enabled = defaultValue
     
-    toggle.MouseButton1Click:Connect(function()
+    local toggleConnection = toggle.MouseButton1Click:Connect(function()
         enabled = not enabled
         
         Services.TweenService:Create(toggle, TweenInfo.new(0.25), {
@@ -1865,6 +1936,7 @@ local function createCompactToggle(name, order, defaultValue, callback)
         
         callback(enabled)
     end)
+    addToCleanup("Connections", toggleConnection)
     
     return toggleFrame
 end
@@ -1908,12 +1980,11 @@ local function createDropdown(name, order, options, defaultValue, callback)
     local selectedCorner = Instance.new("UICorner", selectedBtn)
     selectedCorner.CornerRadius = UDim.new(0, 10)
     
-    -- ИСПРАВЛЕННЫЙ ВЫПАДАЮЩИЙ СПИСОК
     local optionsFrame = Instance.new("Frame")
     optionsFrame.Size = UDim2.new(0.6, -16, 0, 0)
     optionsFrame.Position = UDim2.new(0.4, 0, 1, 4)
-    optionsFrame.BackgroundColor3 = Color3.fromRGB(242, 242, 247) -- Изменено с белого на серый
-    optionsFrame.BackgroundTransparency = 0 -- Убрана прозрачность
+    optionsFrame.BackgroundColor3 = Color3.fromRGB(242, 242, 247)
+    optionsFrame.BackgroundTransparency = 0
     optionsFrame.BorderSizePixel = 0
     optionsFrame.Visible = false
     optionsFrame.ClipsDescendants = true
@@ -1923,7 +1994,6 @@ local function createDropdown(name, order, options, defaultValue, callback)
     local optionsCorner = Instance.new("UICorner", optionsFrame)
     optionsCorner.CornerRadius = UDim.new(0, 12)
     
-    -- Добавлена тень для выпадающего списка
     local optionsShadow = Instance.new("UIStroke", optionsFrame)
     optionsShadow.Color = Color3.fromRGB(0, 0, 0)
     optionsShadow.Thickness = 2
@@ -1935,7 +2005,6 @@ local function createDropdown(name, order, options, defaultValue, callback)
     optionsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     optionsLayout.VerticalAlignment = Enum.VerticalAlignment.Top
     
-    -- Добавлен отступ
     local optionsPadding = Instance.new("UIPadding", optionsFrame)
     optionsPadding.PaddingTop = UDim.new(0, 4)
     optionsPadding.PaddingBottom = UDim.new(0, 4)
@@ -1944,13 +2013,13 @@ local function createDropdown(name, order, options, defaultValue, callback)
     
     local isOpen = false
     
-    selectedBtn.MouseButton1Click:Connect(function()
+    local selectedBtnConnection = selectedBtn.MouseButton1Click:Connect(function()
         isOpen = not isOpen
         
         if isOpen then
             optionsFrame.Visible = true
             Services.TweenService:Create(optionsFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                Size = UDim2.new(0.6, -16, 0, math.min(#options * 40 + 8, 240)) -- Ограничение высоты
+                Size = UDim2.new(0.6, -16, 0, math.min(#options * 40 + 8, 240))
             }):Play()
         else
             Services.TweenService:Create(optionsFrame, TweenInfo.new(0.2), {
@@ -1960,13 +2029,14 @@ local function createDropdown(name, order, options, defaultValue, callback)
             optionsFrame.Visible = false
         end
     end)
+    addToCleanup("Connections", selectedBtnConnection)
     
     for i, option in ipairs(options) do
         local optionBtn = Instance.new("TextButton")
         optionBtn.Size = UDim2.new(1, -8, 0, 36)
         optionBtn.Position = UDim2.new(0, 0, 0, 0)
         optionBtn.BackgroundColor3 = option == defaultValue and Config.AccentColor or Color3.fromRGB(255, 255, 255)
-        optionBtn.BackgroundTransparency = 0 -- Убрана прозрачность
+        optionBtn.BackgroundTransparency = 0
         optionBtn.Text = option
         optionBtn.TextColor3 = option == defaultValue and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(0, 0, 0)
         optionBtn.TextSize = 13
@@ -1979,24 +2049,25 @@ local function createDropdown(name, order, options, defaultValue, callback)
         local optionCorner = Instance.new("UICorner", optionBtn)
         optionCorner.CornerRadius = UDim.new(0, 8)
         
-        -- Эффект при наведении
-        optionBtn.MouseEnter:Connect(function()
+        local optionEnterConnection = optionBtn.MouseEnter:Connect(function()
             if optionBtn.BackgroundColor3 ~= Config.AccentColor then
                 Services.TweenService:Create(optionBtn, TweenInfo.new(0.15), {
                     BackgroundColor3 = Color3.fromRGB(230, 230, 235)
                 }):Play()
             end
         end)
+        addToCleanup("Connections", optionEnterConnection)
         
-        optionBtn.MouseLeave:Connect(function()
+        local optionLeaveConnection = optionBtn.MouseLeave:Connect(function()
             if optionBtn.BackgroundColor3 ~= Config.AccentColor then
                 Services.TweenService:Create(optionBtn, TweenInfo.new(0.15), {
                     BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 }):Play()
             end
         end)
+        addToCleanup("Connections", optionLeaveConnection)
         
-        optionBtn.MouseButton1Click:Connect(function()
+        local optionClickConnection = optionBtn.MouseButton1Click:Connect(function()
             selectedBtn.Text = option
             callback(option)
             
@@ -2021,6 +2092,7 @@ local function createDropdown(name, order, options, defaultValue, callback)
             wait(0.2)
             optionsFrame.Visible = false
         end)
+        addToCleanup("Connections", optionClickConnection)
     end
     
     return dropdownFrame
@@ -2039,7 +2111,7 @@ local espColorPalette = {
 
 local function createColorPicker(name, order, defaultColor, callback, isESP)
     local pickerFrame = Instance.new("Frame")
-    pickerFrame.Size = UDim2.new(0, scrollFrame.AbsoluteSize.X - 12, 0, isESP and 100 or 52)
+    pickerFrame.Size = UDim2.new(0, scrollFrame.AbsoluteSize.X - 12, 0, isESP and 100 or 100)
     pickerFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     pickerFrame.BorderSizePixel = 0
     pickerFrame.BackgroundTransparency = 0.3
@@ -2061,105 +2133,56 @@ local function createColorPicker(name, order, defaultColor, callback, isESP)
     label.TextYAlignment = Enum.TextYAlignment.Center
     label.Parent = pickerFrame
     
-    if isESP then
-        local colorGrid = Instance.new("Frame")
-        colorGrid.Size = UDim2.new(1, -32, 0, 50)
-        colorGrid.Position = UDim2.new(0, 16, 0, 40)
-        colorGrid.BackgroundTransparency = 1
-        colorGrid.Parent = pickerFrame
+    local colorGrid = Instance.new("Frame")
+    colorGrid.Size = UDim2.new(1, -32, 0, 50)
+    colorGrid.Position = UDim2.new(0, 16, 0, 40)
+    colorGrid.BackgroundTransparency = 1
+    colorGrid.Parent = pickerFrame
+    
+    local gridLayout = Instance.new("UIGridLayout")
+    gridLayout.CellSize = UDim2.new(0, 35, 0, 35)
+    gridLayout.CellPadding = UDim2.new(0, 10, 0, 10)
+    gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    gridLayout.Parent = colorGrid
+    
+    for _, color in ipairs(espColorPalette) do
+        local colorBtn = Instance.new("TextButton")
+        colorBtn.Size = UDim2.new(0, 35, 0, 35)
+        colorBtn.BackgroundColor3 = color
+        colorBtn.Text = ""
+        colorBtn.BorderSizePixel = 0
+        colorBtn.Parent = colorGrid
         
-        local gridLayout = Instance.new("UIGridLayout")
-        gridLayout.CellSize = UDim2.new(0, 35, 0, 35)
-        gridLayout.CellPadding = UDim2.new(0, 10, 0, 10)
-        gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-        gridLayout.Parent = colorGrid
+        local colorBtnCorner = Instance.new("UICorner", colorBtn)
+        colorBtnCorner.CornerRadius = UDim.new(1, 0)
         
-        for _, color in ipairs(espColorPalette) do
-            local colorBtn = Instance.new("TextButton")
-            colorBtn.Size = UDim2.new(0, 35, 0, 35)
-            colorBtn.BackgroundColor3 = color
-            colorBtn.Text = ""
-            colorBtn.BorderSizePixel = 0
-            colorBtn.Parent = colorGrid
-            
-            local colorBtnCorner = Instance.new("UICorner", colorBtn)
-            colorBtnCorner.CornerRadius = UDim.new(1, 0)
-            
-            local selected = Instance.new("UIStroke", colorBtn)
-            selected.Color = Color3.fromRGB(255, 255, 255)
-            selected.Thickness = 3
-            selected.Transparency = color == defaultColor and 0 or 1
-            
-            colorBtn.MouseButton1Click:Connect(function()
-                for _, otherBtn in ipairs(colorGrid:GetChildren()) do
-                    if otherBtn:IsA("TextButton") then
-                        local stroke = otherBtn:FindFirstChildOfClass("UIStroke")
-                        if stroke then
-                            Services.TweenService:Create(stroke, TweenInfo.new(0.2), {
-                                Transparency = 1
-                            }):Play()
-                        end
+        local selected = Instance.new("UIStroke", colorBtn)
+        selected.Color = Color3.fromRGB(255, 255, 255)
+        selected.Thickness = 3
+        selected.Transparency = color == defaultColor and 0 or 1
+        
+        local colorBtnConnection = colorBtn.MouseButton1Click:Connect(function()
+            for _, otherBtn in ipairs(colorGrid:GetChildren()) do
+                if otherBtn:IsA("TextButton") then
+                    local stroke = otherBtn:FindFirstChildOfClass("UIStroke")
+                    if stroke then
+                        Services.TweenService:Create(stroke, TweenInfo.new(0.2), {
+                            Transparency = 1
+                        }):Play()
                     end
                 end
-                
-                Services.TweenService:Create(selected, TweenInfo.new(0.2), {
-                    Transparency = 0
-                }):Play()
-                
-                callback(color)
-            end)
-        end
-    else
-        local colorGrid = Instance.new("Frame")
-        colorGrid.Size = UDim2.new(1, -32, 0, 50)
-        colorGrid.Position = UDim2.new(0, 16, 0, 40)
-        colorGrid.BackgroundTransparency = 1
-        colorGrid.Parent = pickerFrame
-        
-        local gridLayout = Instance.new("UIGridLayout")
-        gridLayout.CellSize = UDim2.new(0, 35, 0, 35)
-        gridLayout.CellPadding = UDim2.new(0, 10, 0, 10)
-        gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-        gridLayout.Parent = colorGrid
-        
-        pickerFrame.Size = UDim2.new(0, scrollFrame.AbsoluteSize.X - 12, 0, 100)
-        
-        for _, color in ipairs(espColorPalette) do
-            local colorBtn = Instance.new("TextButton")
-            colorBtn.Size = UDim2.new(0, 35, 0, 35)
-            colorBtn.BackgroundColor3 = color
-            colorBtn.Text = ""
-            colorBtn.BorderSizePixel = 0
-            colorBtn.Parent = colorGrid
+            end
             
-            local colorBtnCorner = Instance.new("UICorner", colorBtn)
-            colorBtnCorner.CornerRadius = UDim.new(1, 0)
+            Services.TweenService:Create(selected, TweenInfo.new(0.2), {
+                Transparency = 0
+            }):Play()
             
-            local selected = Instance.new("UIStroke", colorBtn)
-            selected.Color = Color3.fromRGB(255, 255, 255)
-            selected.Thickness = 3
-            selected.Transparency = color == defaultColor and 0 or 1
-            
-            colorBtn.MouseButton1Click:Connect(function()
-                for _, otherBtn in ipairs(colorGrid:GetChildren()) do
-                    if otherBtn:IsA("TextButton") then
-                        local stroke = otherBtn:FindFirstChildOfClass("UIStroke")
-                        if stroke then
-                            Services.TweenService:Create(stroke, TweenInfo.new(0.2), {
-                                Transparency = 1
-                            }):Play()
-                        end
-                    end
-                end
-                
-                Services.TweenService:Create(selected, TweenInfo.new(0.2), {
-                    Transparency = 0
-                }):Play()
-                
+            if not isESP then
                 updateGUIColors(color)
-                callback(color)
-            end)
-        end
+            end
+            callback(color)
+        end)
+        addToCleanup("Connections", colorBtnConnection)
     end
     
     return pickerFrame
@@ -2206,7 +2229,7 @@ local function createKeybindPicker(name, order, defaultKey, callback)
     
     local listening = false
     
-    keybindBtn.MouseButton1Click:Connect(function()
+    local keybindBtnConnection = keybindBtn.MouseButton1Click:Connect(function()
         listening = true
         keybindBtn.Text = "..."
         keybindBtn.TextColor3 = Color3.fromRGB(255, 149, 0)
@@ -2223,7 +2246,9 @@ local function createKeybindPicker(name, order, defaultKey, callback)
                 connection:Disconnect()
             end
         end)
+        addToCleanup("Connections", connection)
     end)
+    addToCleanup("Connections", keybindBtnConnection)
     
     return keybindFrame
 end
@@ -2244,7 +2269,7 @@ shutdownBtn.Parent = scrollFrame
 local shutdownCorner = Instance.new("UICorner", shutdownBtn)
 shutdownCorner.CornerRadius = UDim.new(0, 16)
 
-shutdownBtn.MouseButton1Click:Connect(function()
+local shutdownConnection = shutdownBtn.MouseButton1Click:Connect(function()
     shutdownBtn.Text = "Shutting down..."
     shutdownBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 30)
     
@@ -2272,14 +2297,15 @@ shutdownBtn.MouseButton1Click:Connect(function()
         Size = 0
     }):Play()
     
-    Services.TweenService:Create(floatingButton, TweenInfo.new(0.4), {
-        BackgroundColor3 = Color3.fromRGB(142, 142, 147)
-    }):Play()
+    wait(0.5)
     
-    wait(0.4)
+    -- FULL CLEANUP
+    performFullCleanup()
+    
+    wait(0.1)
     gui:Destroy()
-    blurEffect:Destroy()
 end)
+addToCleanup("Connections", shutdownConnection)
 
 createModuleSection("Combat", 1)
 
@@ -2491,7 +2517,7 @@ createCompactToggle("Show Targeting", 31, Config.ShowTargeting, function(value)
     Config.ShowTargeting = value
 end)
 
-Services.UserInputService.InputBegan:Connect(function(input, processed)
+local guiToggleConnection = Services.UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
     if input.KeyCode == Config.GUIToggleKey then
         mainFrame.Visible = not mainFrame.Visible
@@ -2508,10 +2534,6 @@ Services.UserInputService.InputBegan:Connect(function(input, processed)
             Services.TweenService:Create(blurEffect, TweenInfo.new(0.3), {
                 Size = 15
             }):Play()
-            
-            Services.TweenService:Create(floatingButton, TweenInfo.new(0.3), {
-                BackgroundColor3 = Color3.fromRGB(142, 142, 147)
-            }):Play()
         else
             Services.TweenService:Create(mainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
                 Size = UDim2.new(0, 0, 0, 0),
@@ -2521,13 +2543,10 @@ Services.UserInputService.InputBegan:Connect(function(input, processed)
             Services.TweenService:Create(blurEffect, TweenInfo.new(0.3), {
                 Size = 0
             }):Play()
-            
-            Services.TweenService:Create(floatingButton, TweenInfo.new(0.3), {
-                BackgroundColor3 = Config.AccentColor
-            }):Play()
         end
     end
 end)
+addToCleanup("Connections", guiToggleConnection)
 
 wait(0.5)
 mainFrame.Visible = true
