@@ -1,14 +1,46 @@
 --[[
      ███████╗███████╗███╗   ███╗███╗   ██╗██╗██╗  ██╗██╗  ██╗██╗  ██╗
      ██╔════╝██╔════╝████╗ ████║████╗  ██║██║╚██╗██╔╝╚██╗██╔╝╚██╗██╔╝
-     █████╗  █████╗  ██╔████╔██║██╔██╗ ██║██║ ╚███╔╝  ╚███╔╝  ╚███╔╝
-      ██╔══╝  ██╔══╝  ██║╚██╔╝██║██║╚██╗██║██║ ██╔██╗  ██╔██╗  ██╔██╗
-      ██║     ███████╗██║ ╚═╝ ██║██║ ╚████║██║██╔╝ ██╗██╔╝ ██╗██╔╝ ██╗
+     █████╗  █████╗  ██╔████╔██║██╔██╗ ██║██║ ╚███╔╝  ╚███╔╝  ╚███╔╝ 
+     ██╔══╝  ██╔══╝  ██║╚██╔╝██║██║╚██╗██║██║ ██╔██╗  ██╔██╗  ██╔██╗ 
+     ██║     ███████╗██║ ╚═╝ ██║██║ ╚████║██║██╔╝ ██╗██╔╝ ██╗██╔╝ ██╗
      ╚═╝     ╚══════╝╚═╝     ╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝
-
+     
      iOS 18 CONTROL CENTER STYLE - COLLAPSIBLE GUI WITH FLOATING BUTTON
      Made with ❤ by FENNIXXX Team
 ]]
+
+-- ════════════════════════════════════════════════════════════════
+-- COMPATIBILITY LAYER
+-- ════════════════════════════════════════════════════════════════
+
+local request = (syn and syn.request) or (http and http.request) or http_request or (fluxus and fluxus.request) or request
+local setclipboard = setclipboard or toclipboard or set_clipboard or (Clipboard and Clipboard.set)
+local getrawmetatable = getrawmetatable or debug.getmetatable
+local hookfunction = hookfunction or replaceclosure or detour_function
+local newcclosure = newcclosure or protect_function or function(f) return f end
+local setreadonly = setreadonly or make_writeable or function() end
+local checkcaller = checkcaller or is_caller or function() return false end
+
+-- Проверка наличия критических функций
+if not request then
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "FENNIXXX Error";
+        Text = "Your executor doesn't support HTTP requests!";
+        Duration = 5;
+    })
+    return
+end
+
+if not setclipboard then
+    setclipboard = function(text)
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "Copy Failed";
+            Text = "Clipboard not supported on your executor";
+            Duration = 3;
+        })
+    end
+end
 
 -- ════════════════════════════════════════════════════════════════
 -- CORE SERVICES
@@ -39,8 +71,14 @@ local sessionID = ""
 local scriptEnabled = true
 
 local function getHWID()
-    local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
-    return hwid
+    local success, hwid = pcall(function()
+        return game:GetService("RbxAnalyticsService"):GetClientId()
+    end)
+    if success then
+        return hwid
+    else
+        return tostring(game:GetService("HttpService"):GenerateGUID(false))
+    end
 end
 
 local function initKeyAuth()
@@ -98,10 +136,10 @@ local function verifyLicense(key)
                 ["Content-Type"] = "application/x-www-form-urlencoded"
             },
             Body = "type=license&key=" .. Services.HttpService:UrlEncode(key) ..
-                    "&sessionid=" .. sessionID ..
-                    "&name=" .. KeyAuthApp ..
-                    "&ownerid=" .. KeyAuthOwnerID ..
-                    "&hwid=" .. hwid
+                   "&sessionid=" .. sessionID ..
+                   "&name=" .. KeyAuthApp ..
+                   "&ownerid=" .. KeyAuthOwnerID ..
+                   "&hwid=" .. hwid
         })
     end)
     
@@ -141,7 +179,14 @@ local function createAuthGUI()
     authGui.Name = "KeyAuthGUI"
     authGui.IgnoreGuiInset = true
     authGui.ResetOnSpawn = false
-    authGui.Parent = Services.CoreGui
+    
+    pcall(function()
+        authGui.Parent = Services.CoreGui
+    end)
+    
+    if not authGui.Parent then
+        authGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    end
     
     local darkBackground = Instance.new("Frame")
     darkBackground.Size = UDim2.new(1, 0, 1, 0)
@@ -451,7 +496,7 @@ local Config = {
     HitPart = "HumanoidRootPart",
     FOVSize = 80,
     TeamCheck = false,
-    KnockedCheck = false,
+    KnockedCheck = true,
     WallCheck = false,
     VisibleCheck = false,
     MaxDistance = 500,
@@ -872,30 +917,62 @@ local function isKnocked(player)
     local cacheKey = player.UserId
     local now = tick()
     
-    if knockedCache[cacheKey] and now - knockedCache[cacheKey].time < 0.5 then
+    if knockedCache[cacheKey] and now - knockedCache[cacheKey].time < 0.3 then
         return knockedCache[cacheKey].result
     end
     
     local character = player.Character
-    if not character then return false end
+    if not character then 
+        knockedCache[cacheKey] = {result = false, time = now}
+        return false 
+    end
     
     local humanoid = character:FindFirstChildOfClass("Humanoid")
+    
     if humanoid and humanoid.Health <= 0 then
         knockedCache[cacheKey] = {result = true, time = now}
         return true
     end
     
     local bodyEffects = character:FindFirstChild("BodyEffects")
-    local result = false
     if bodyEffects then
-        local knocked = bodyEffects:FindFirstChild("K.O")
-        if knocked and knocked.Value == true then
-            result = true
+        local koValue = bodyEffects:FindFirstChild("K.O")
+        if koValue and koValue.Value == true then
+            knockedCache[cacheKey] = {result = true, time = now}
+            return true
         end
     end
     
-    knockedCache[cacheKey] = {result = result, time = now}
-    return result
+    local ragdoll = character:FindFirstChild("Ragdoll")
+    if ragdoll and ragdoll.Value == true then
+        knockedCache[cacheKey] = {result = true, time = now}
+        return true
+    end
+    
+    if humanoid then
+        local state = humanoid:GetState()
+        if state == Enum.HumanoidStateType.Dead or
+           state == Enum.HumanoidStateType.Physics or
+           state == Enum.HumanoidStateType.PlatformStanding then
+            knockedCache[cacheKey] = {result = true, time = now}
+            return true
+        end
+    end
+    
+    local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+    if animator then
+        local tracks = animator:GetPlayingAnimationTracks()
+        for _, track in ipairs(tracks) do
+            local animName = track.Animation.AnimationId:lower()
+            if animName:find("ko") or animName:find("knocked") or animName:find("down") then
+                knockedCache[cacheKey] = {result = true, time = now}
+                return true
+            end
+        end
+    end
+    
+    knockedCache[cacheKey] = {result = false, time = now}
+    return false
 end
 
 local wallCheckCache = {}
@@ -1151,18 +1228,25 @@ Services.UserInputService.InputBegan:Connect(function(input, processed)
     end
 end)
 
-local mt = getrawmetatable(game)
-local oldIndex = mt.__index
-setreadonly(mt, false)
-mt.__index = newcclosure(function(obj, prop)
-    if Config.Enabled and scriptEnabled and obj:IsA("Mouse") and (prop == "Hit" or prop == "Target") then
-        if cachedTarget and cachedTargetPoint then
-            return prop == "Hit" and CFrame.new(cachedTargetPoint) or cachedTarget
+-- МЕТАТАБЛИЦА ДЛЯ SILENT AIM
+pcall(function()
+    if not getrawmetatable or not hookfunction then return end
+    
+    local mt = getrawmetatable(game)
+    local oldIndex = mt.__index
+    setreadonly(mt, false)
+    
+    mt.__index = newcclosure(function(obj, prop)
+        if Config.Enabled and scriptEnabled and obj:IsA("Mouse") and (prop == "Hit" or prop == "Target") then
+            if cachedTarget and cachedTargetPoint then
+                return prop == "Hit" and CFrame.new(cachedTargetPoint) or cachedTarget
+            end
         end
-    end
-    return oldIndex(obj, prop)
+        return oldIndex(obj, prop)
+    end)
+    
+    setreadonly(mt, true)
 end)
-setreadonly(mt, true)
 
 Services.RunService.RenderStepped:Connect(function()
     if not Config.Enabled or not scriptEnabled then return end
@@ -1203,16 +1287,21 @@ end
 
 setupRapidFire()
 
-local oldRandom
-oldRandom = hookfunction(math.random, function(...)
-    local args = {...}
-    if checkcaller() then return oldRandom(...) end
-    if (#args == 0) or (args[1] == -0.05 and args[2] == 0.05) or (args[1] == -0.1) or (args[1] == -0.05) then
-        if SpreadMod.BulletSpread.Enabled then
-            return oldRandom(...) * (SpreadMod.BulletSpread.Amount / 100)
+-- BULLET SPREAD MODIFIER
+pcall(function()
+    if not hookfunction then return end
+    
+    local oldRandom
+    oldRandom = hookfunction(math.random, function(...)
+        local args = {...}
+        if checkcaller() then return oldRandom(...) end
+        if (#args == 0) or (args[1] == -0.05 and args[2] == 0.05) or (args[1] == -0.1) or (args[1] == -0.05) then
+            if SpreadMod.BulletSpread.Enabled then
+                return oldRandom(...) * (SpreadMod.BulletSpread.Amount / 100)
+            end
         end
-    end
-    return oldRandom(...)
+        return oldRandom(...)
+    end)
 end)
 
 Services.Players.PlayerRemoving:Connect(function(player)
@@ -1230,13 +1319,19 @@ local gui = Instance.new("ScreenGui")
 gui.IgnoreGuiInset = true
 gui.ResetOnSpawn = false
 gui.Name = "FennixAimUI"
-gui.Parent = Services.CoreGui
+
+pcall(function()
+    gui.Parent = Services.CoreGui
+end)
+
+if not gui.Parent then
+    gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
 
 local blurEffect = Instance.new("BlurEffect")
 blurEffect.Size = 0
 blurEffect.Parent = game:GetService("Lighting")
 
--- ОСНОВНОЙ ФРЕЙМ ГУИ
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0, Config.GUISize.Width, 0, Config.GUISize.Height)
 mainFrame.Position = UDim2.new(0.5, -Config.GUISize.Width/2, 0.5, -Config.GUISize.Height/2)
@@ -1256,7 +1351,6 @@ mainStroke.Color = Color3.fromRGB(210, 210, 215)
 mainStroke.Thickness = 1
 mainStroke.Transparency = 0.5
 
--- КНОПКА ЗАКРЫТИЯ И ОТКРЫТИЯ ВНУТРИ ГУИ
 local closeButtonInside = Instance.new("TextButton")
 closeButtonInside.Size = UDim2.new(0, 45, 0, 45)
 closeButtonInside.Position = UDim2.new(1, -65, 0, 12)
@@ -1277,7 +1371,6 @@ closeStrokeInside.Color = Color3.fromRGB(210, 210, 215)
 closeStrokeInside.Thickness = 1
 closeStrokeInside.Transparency = 0.5
 
--- ПЛАВАЮЩАЯ КНОПКА ОТКРЫТИЯ (В СТИЛЕ iOS)
 local floatingButton = Instance.new("TextButton")
 floatingButton.Size = UDim2.new(0, 60, 0, 60)
 floatingButton.Position = UDim2.new(1, -75, 1, -75)
@@ -1293,7 +1386,6 @@ floatingButton.Parent = gui
 local floatingCorner = Instance.new("UICorner", floatingButton)
 floatingCorner.CornerRadius = UDim.new(1, 0)
 
--- ТЕНЬ ДЛЯ ПЛАВАЮЩЕЙ КНОПКИ
 local shadow = Instance.new("Frame")
 shadow.Size = UDim2.new(0, 60, 0, 60)
 shadow.Position = floatingButton.Position + UDim2.new(0, 2, 0, 2)
@@ -1306,12 +1398,10 @@ shadow.Parent = gui
 local shadowCorner = Instance.new("UICorner", shadow)
 shadowCorner.CornerRadius = UDim.new(1, 0)
 
--- ПЕРЕМЕННЫЕ ДЛЯ ПЕРЕМЕЩЕНИЯ КНОПКИ
 local isDraggingFloatingButton = false
 local dragStartPos = nil
 local buttonStartPos = nil
 
--- СОБЫТИЕ НАЖАТИЯ НА ПЛАВАЮЩУЮ КНОПКУ
 floatingButton.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         isDraggingFloatingButton = true
@@ -1320,14 +1410,12 @@ floatingButton.InputBegan:Connect(function(input)
     end
 end)
 
--- СОБЫТИЕ ОТПУСКАНИЯ КНОПКИ
 Services.UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         isDraggingFloatingButton = false
     end
 end)
 
--- ОБНОВЛЕНИЕ ПОЗИЦИИ ПЛАВАЮЩЕЙ КНОПКИ ПРИ ПЕРЕТАСКИВАНИИ
 Services.RunService.RenderStepped:Connect(function()
     if isDraggingFloatingButton then
         local currentMouse = Services.UserInputService:GetMouseLocation()
@@ -1344,7 +1432,6 @@ Services.RunService.RenderStepped:Connect(function()
     end
 end)
 
--- СОБЫТИЕ КЛИКА НА ПЛАВАЮЩУЮ КНОПКУ (ОТКРЫТИЕ ГУИ)
 floatingButton.MouseButton1Click:Connect(function()
     if not isDraggingFloatingButton or (Services.UserInputService:GetMouseLocation() - dragStartPos).Magnitude < 5 then
         mainFrame.Visible = true
@@ -1367,7 +1454,6 @@ floatingButton.MouseButton1Click:Connect(function()
     end
 end)
 
--- СОБЫТИЕ КЛИКА НА КНОПКУ ЗАКРЫТИЯ
 closeButtonInside.MouseButton1Click:Connect(function()
     mainFrame.Visible = false
     
@@ -1385,7 +1471,6 @@ closeButtonInside.MouseButton1Click:Connect(function()
     }):Play()
 end)
 
--- HOVER ЭФФЕКТЫ НА КНОПКЕ ЗАКРЫТИЯ
 closeButtonInside.MouseEnter:Connect(function()
     Services.TweenService:Create(closeButtonInside, TweenInfo.new(0.2), {
         BackgroundColor3 = Color3.fromRGB(220, 220, 225)
@@ -1398,7 +1483,6 @@ closeButtonInside.MouseLeave:Connect(function()
     }):Play()
 end)
 
--- HOVER ЭФФЕКТЫ НА ПЛАВАЮЩЕЙ КНОПКЕ
 floatingButton.MouseEnter:Connect(function()
     Services.TweenService:Create(floatingButton, TweenInfo.new(0.2), {
         Size = UDim2.new(0, 65, 0, 65)
@@ -1419,7 +1503,6 @@ floatingButton.MouseLeave:Connect(function()
     }):Play()
 end)
 
--- TITLE BAR
 local titleBar = Instance.new("Frame")
 titleBar.Size = UDim2.new(1, 0, 0, 70)
 titleBar.BackgroundTransparency = 1
@@ -1436,7 +1519,6 @@ title.BackgroundTransparency = 1
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = titleBar
 
--- ПЕРЕМЕЩЕНИЕ ОКНА
 local dragging = false
 local dragStart = nil
 local startPosFrame = nil
@@ -1468,7 +1550,6 @@ Services.RunService.RenderStepped:Connect(function()
     end
 end)
 
--- SCROLLING FRAME
 local scrollFrame = Instance.new("ScrollingFrame")
 scrollFrame.Size = UDim2.new(1, -24, 1, -90)
 scrollFrame.Position = UDim2.new(0, 12, 0, 78)
@@ -1489,7 +1570,6 @@ scrollLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     scrollFrame.CanvasSize = UDim2.new(0, 0, 0, scrollLayout.AbsoluteContentSize.Y + 20)
 end)
 
--- ФУНКЦИИ ДЛЯ СОЗДАНИЯ UI ЭЛЕМЕНТОВ
 local function updateGUIColors(newColor)
     Config.AccentColor = newColor
     FOVCircle.Color = newColor
@@ -1848,7 +1928,7 @@ local function createDropdown(name, order, options, defaultValue, callback)
         local optionBtn = Instance.new("TextButton")
         optionBtn.Size = UDim2.new(1, -4, 0, 36)
         optionBtn.Position = UDim2.new(0, 2, 0, 0)
-        optionBtn.BackgroundColor3 = option == defaultValue and Color3.fromRGB(0, 122, 255) or Color3.fromRGB(242, 242, 247)
+        optionBtn.BackgroundColor3 = option == defaultValue and Config.AccentColor or Color3.fromRGB(242, 242, 247)
         optionBtn.Text = option
         optionBtn.TextColor3 = option == defaultValue and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(0, 0, 0)
         optionBtn.TextSize = 13
@@ -2078,6 +2158,7 @@ local function createKeybindPicker(name, order, defaultKey, callback)
         local connection
         connection = Services.UserInputService.InputBegan:Connect(function(input, processed)
             if processed then return end
+            
             if input.UserInputType == Enum.UserInputType.Keyboard then
                 listening = false
                 keybindBtn.Text = input.KeyCode.Name
@@ -2091,7 +2172,6 @@ local function createKeybindPicker(name, order, defaultKey, callback)
     return keybindFrame
 end
 
--- КНОПКА ВЫКЛЮЧЕНИЯ
 local shutdownBtn = Instance.new("TextButton")
 shutdownBtn.Size = UDim2.new(0, scrollFrame.AbsoluteSize.X - 12, 0, 55)
 shutdownBtn.Position = UDim2.new(0, 0, 0, 0)
@@ -2145,8 +2225,6 @@ shutdownBtn.MouseButton1Click:Connect(function()
     blurEffect:Destroy()
 end)
 
--- СОЗДАНИЕ UI ЭЛЕМЕНТОВ
-
 createModuleSection("Combat", 1)
 
 local gridContainer1 = Instance.new("Frame")
@@ -2188,6 +2266,10 @@ createCircleButton("Multipoint", 6, Config.Multipoint, function(value)
     else
         MultipointCircle.Visible = false
     end
+end).Parent = gridContainer1
+
+createCircleButton("KO Check", 7, Config.KnockedCheck, function(value)
+    Config.KnockedCheck = value
 end).Parent = gridContainer1
 
 createModuleSection("Combat Settings", 3)
@@ -2353,7 +2435,6 @@ createCompactToggle("Show Targeting", 31, Config.ShowTargeting, function(value)
     Config.ShowTargeting = value
 end)
 
--- ГОРЯЧАЯ КЛАВИША ДЛЯ ОТКРЫТИЯ/ЗАКРЫТИЯ ГУИ
 Services.UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
     if input.KeyCode == Config.GUIToggleKey then
