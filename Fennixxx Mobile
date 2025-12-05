@@ -5,9 +5,8 @@
      ██╔══╝  ██╔══╝  ██║╚██╔╝██║██║╚██╗██║██║ ██╔██╗  ██╔██╗  ██╔██╗ 
      ██║     ███████╗██║ ╚═╝ ██║██║ ╚████║██║██╔╝ ██╗██╔╝ ██╗██╔╝ ██╗
      ╚═╝     ╚══════╝╚═╝     ╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝
-     
-     iOS 18 CONTROL CENTER STYLE - COLLAPSIBLE GUI WITH FLOATING BUTTON
-     Made with ❤ by FENNIXXX Team
+           iOS 18 CONTROL CENTER STYLE - MOBILE OPTIMIZED
+     Made with ❤ by FENNIXXX Team - MOBILE VERSION
 ]]
 
 -- ════════════════════════════════════════════════════════════════
@@ -60,15 +59,23 @@ local Services = {
 local LocalPlayer = Services.Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
---- KeyAuth Configuration
+--- KeyAuth Configuration - MULTI-OWNER SUPPORT
 local KeyAuthApp = "FENNIXXX"
-local KeyAuthOwnerID = "Gi9EhXEQsn"
+local KeyAuthOwnerIDs = {
+    "Gi9EhXEQsn",
+    -- Добавляйте дополнительные OwnerID сюда:
+    "B05VCYnbf0",
+    "6oOmPZgEug",
+    "edcEgR58Gp",
+    "Gi9EhXEQsn"
+}
 local KeyAuthVersion = "1.0"
 local KeyAuthURL = "https://keyauth.win/api/1.2/"
 
 local isAuthorized = false
 local sessionID = ""
 local scriptEnabled = true
+local currentOwnerID = nil
 
 local function getHWID()
     local success, hwid = pcall(function()
@@ -81,7 +88,8 @@ local function getHWID()
     end
 end
 
-local function initKeyAuth()
+-- Инициализация KeyAuth для конкретного OwnerID
+local function initKeyAuth(ownerID)
     local success, response = pcall(function()
         return request({
             Url = KeyAuthURL,
@@ -89,12 +97,12 @@ local function initKeyAuth()
             Headers = {
                 ["Content-Type"] = "application/x-www-form-urlencoded"
             },
-            Body = "type=init&ver=" .. KeyAuthVersion .. "&name=" .. KeyAuthApp .. "&ownerid=" .. KeyAuthOwnerID
+            Body = "type=init&ver=" .. KeyAuthVersion .. "&name=" .. KeyAuthApp .. "&ownerid=" .. ownerID
         })
     end)
     
     if not success then
-        return false, "Connection failed"
+        return false, "Connection failed", nil
     end
     
     if response.StatusCode == 200 then
@@ -104,74 +112,231 @@ local function initKeyAuth()
         
         if decodeSuccess then
             if data.success then
-                sessionID = data.sessionid
-                return true, "Initialized"
+                return true, "Initialized", data.sessionid
             else
-                return false, data.message or "Init failed"
+                return false, data.message or "Init failed", nil
             end
         else
-            return false, "Invalid response"
+            return false, "Invalid response", nil
         end
     else
-        return false, "Server error: " .. response.StatusCode
+        return false, "Server error: " .. response.StatusCode, nil
     end
 end
 
-local function verifyLicense(key)
-    if not sessionID or sessionID == "" then
-        local initSuccess, initMsg = initKeyAuth()
-        if not initSuccess then
-            return false, "Failed to initialize: " .. initMsg
+-- Попытка инициализации со всеми OwnerID
+local function initializeWithAnyOwner()
+    for _, ownerID in ipairs(KeyAuthOwnerIDs) do
+        local success, message, sid = initKeyAuth(ownerID)
+        if success and sid then
+            sessionID = sid
+            currentOwnerID = ownerID
+            return true, "Initialized with owner: " .. ownerID
         end
-        wait(0.5)
+        wait(0.3)
     end
-    
+    return false, "Failed to initialize with any owner"
+end
+
+-- ВАРИАНТ 1: Последовательная проверка (пробует каждый OwnerID по очереди)
+local function verifyLicenseSequential(key)
     local hwid = getHWID()
     
-    local success, response = pcall(function()
-        return request({
-            Url = KeyAuthURL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/x-www-form-urlencoded"
-            },
-            Body = "type=license&key=" .. Services.HttpService:UrlEncode(key) ..
-                   "&sessionid=" .. sessionID ..
-                   "&name=" .. KeyAuthApp ..
-                   "&ownerid=" .. KeyAuthOwnerID ..
-                   "&hwid=" .. hwid
-        })
-    end)
-    
-    if not success then
-        return false, "Connection failed"
-    end
-    
-    if response.StatusCode == 200 then
-        local decodeSuccess, data = pcall(function()
-            return Services.HttpService:JSONDecode(response.Body)
-        end)
-        
-        if decodeSuccess then
-            if data.success then
-                local exp = "Lifetime"
-                if data.info and data.info.subscriptions then
-                    for _, sub in pairs(data.info.subscriptions) do
-                        if sub.expiry and sub.expiry ~= "lifetime" then
-                            exp = os.date("%m/%d/%Y %H:%M", tonumber(sub.expiry))
+    for _, ownerID in ipairs(KeyAuthOwnerIDs) do
+        -- Инициализируем для каждого OwnerID
+        local initSuccess, initMsg, sid = initKeyAuth(ownerID)
+        if initSuccess and sid then
+            wait(0.3)
+            
+            local success, response = pcall(function()
+                return request({
+                    Url = KeyAuthURL,
+                    Method = "POST",
+                    Headers = {
+                        ["Content-Type"] = "application/x-www-form-urlencoded"
+                    },
+                    Body = "type=license&key=" .. Services.HttpService:UrlEncode(key) ..
+                           "&sessionid=" .. sid ..
+                           "&name=" .. KeyAuthApp ..
+                           "&ownerid=" .. ownerID ..
+                           "&hwid=" .. hwid
+                })
+            end)
+            
+            if success and response.StatusCode == 200 then
+                local decodeSuccess, data = pcall(function()
+                    return Services.HttpService:JSONDecode(response.Body)
+                end)
+                
+                if decodeSuccess and data.success then
+                    sessionID = sid
+                    currentOwnerID = ownerID
+                    
+                    local exp = "Lifetime"
+                    if data.info and data.info.subscriptions then
+                        for _, sub in pairs(data.info.subscriptions) do
+                            if sub.expiry and sub.expiry ~= "lifetime" then
+                                exp = os.date("%m/%d/%Y %H:%M", tonumber(sub.expiry))
+                            end
                         end
                     end
+                    return true, "License verified! (Owner: " .. ownerID:sub(1,6) .. "...) Expires: " .. exp
                 end
-                return true, "License verified! Expires: " .. exp
-            else
-                return false, data.message or "Invalid license key"
             end
-        else
-            return false, "Invalid response from server"
         end
-    else
-        return false, "Server error: " .. response.StatusCode
+        wait(0.2)
     end
+    
+    return false, "Invalid license key or all owners failed"
+end
+
+-- ВАРИАНТ 2: Параллельная проверка (пробует все OwnerID одновременно)
+local function verifyLicenseParallel(key)
+    local hwid = getHWID()
+    local results = {}
+    local completed = 0
+    local totalOwners = #KeyAuthOwnerIDs
+    
+    for index, ownerID in ipairs(KeyAuthOwnerIDs) do
+        spawn(function()
+            local initSuccess, initMsg, sid = initKeyAuth(ownerID)
+            if initSuccess and sid then
+                wait(0.2)
+                
+                local success, response = pcall(function()
+                    return request({
+                        Url = KeyAuthURL,
+                        Method = "POST",
+                        Headers = {
+                            ["Content-Type"] = "application/x-www-form-urlencoded"
+                        },
+                        Body = "type=license&key=" .. Services.HttpService:UrlEncode(key) ..
+                               "&sessionid=" .. sid ..
+                               "&name=" .. KeyAuthApp ..
+                               "&ownerid=" .. ownerID ..
+                               "&hwid=" .. hwid
+                    })
+                end)
+                
+                if success and response.StatusCode == 200 then
+                    local decodeSuccess, data = pcall(function()
+                        return Services.HttpService:JSONDecode(response.Body)
+                    end)
+                    
+                    if decodeSuccess and data.success then
+                        results[index] = {
+                            success = true,
+                            ownerID = ownerID,
+                            sessionID = sid,
+                            data = data
+                        }
+                    else
+                        results[index] = {success = false}
+                    end
+                else
+                    results[index] = {success = false}
+                end
+            else
+                results[index] = {success = false}
+            end
+            completed = completed + 1
+        end)
+    end
+    
+    -- Ждем завершения всех запросов (максимум 10 секунд)
+    local startTime = tick()
+    while completed < totalOwners and (tick() - startTime) < 10 do
+        wait(0.1)
+    end
+    
+    -- Проверяем результаты
+    for index, result in pairs(results) do
+        if result.success then
+            sessionID = result.sessionID
+            currentOwnerID = result.ownerID
+            
+            local exp = "Lifetime"
+            if result.data.info and result.data.info.subscriptions then
+                for _, sub in pairs(result.data.info.subscriptions) do
+                    if sub.expiry and sub.expiry ~= "lifetime" then
+                        exp = os.date("%m/%d/%Y %H:%M", tonumber(sub.expiry))
+                    end
+                end
+            end
+            return true, "License verified! (Owner: " .. result.ownerID:sub(1,6) .. "...) Expires: " .. exp
+        end
+    end
+    
+    return false, "Invalid license key or all owners failed"
+end
+
+-- ВАРИАНТ 3: С повторными попытками и задержками
+local function verifyLicenseWithRetry(key, maxRetries)
+    maxRetries = maxRetries or 2
+    local hwid = getHWID()
+    
+    for _, ownerID in ipairs(KeyAuthOwnerIDs) do
+        for retry = 1, maxRetries do
+            local initSuccess, initMsg, sid = initKeyAuth(ownerID)
+            if initSuccess and sid then
+                wait(0.3)
+                
+                local success, response = pcall(function()
+                    return request({
+                        Url = KeyAuthURL,
+                        Method = "POST",
+                        Headers = {
+                            ["Content-Type"] = "application/x-www-form-urlencoded"
+                        },
+                        Body = "type=license&key=" .. Services.HttpService:UrlEncode(key) ..
+                               "&sessionid=" .. sid ..
+                               "&name=" .. KeyAuthApp ..
+                               "&ownerid=" .. ownerID ..
+                               "&hwid=" .. hwid
+                })
+                end)
+                
+                if success and response.StatusCode == 200 then
+                    local decodeSuccess, data = pcall(function()
+                        return Services.HttpService:JSONDecode(response.Body)
+                    end)
+                    
+                    if decodeSuccess and data.success then
+                        sessionID = sid
+                        currentOwnerID = ownerID
+                        
+                        local exp = "Lifetime"
+                        if data.info and data.info.subscriptions then
+                            for _, sub in pairs(data.info.subscriptions) do
+                                if sub.expiry and sub.expiry ~= "lifetime" then
+                                    exp = os.date("%m/%d/%Y %H:%M", tonumber(sub.expiry))
+                                end
+                            end
+                        end
+                        return true, "License verified! (Owner: " .. ownerID:sub(1,6) .. "..., Try: " .. retry .. ") Expires: " .. exp
+                    end
+                end
+                
+                if retry < maxRetries then
+                    wait(0.5)
+                end
+            end
+        end
+    end
+    
+    return false, "Invalid license key or all attempts failed"
+end
+
+-- Выбор метода проверки (можно изменить)
+local function verifyLicense(key)
+    -- Используем ВАРИАНТ 1 (последовательная проверка)
+    -- return verifyLicenseSequential(key)
+    
+    -- Используем ВАРИАНТ 2 (параллельная проверка - быстрее)
+    return verifyLicenseParallel(key)
+    
+    -- Используем ВАРИАНТ 3 (с повторными попытками)
+    -- return verifyLicenseWithRetry(key, 2)
 end
 
 local function createAuthGUI()
@@ -1312,13 +1477,14 @@ end)
 setupWalkSpeed()
 
 -- ════════════════════════════════════════════════════════════════
--- iOS 18 COLLAPSIBLE CONTROL CENTER STYLE GUI WITH FLOATING BUTTON
+-- MOBILE OPTIMIZED GUI WITH TOUCH SUPPORT - FIXED VERSION
 -- ════════════════════════════════════════════════════════════════
 
 local gui = Instance.new("ScreenGui")
 gui.IgnoreGuiInset = true
 gui.ResetOnSpawn = false
 gui.Name = "FennixAimUI"
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 pcall(function()
     gui.Parent = Services.CoreGui
@@ -1339,7 +1505,7 @@ mainFrame.BackgroundColor3 = Config.GUIColor
 mainFrame.BorderSizePixel = 0
 mainFrame.BackgroundTransparency = Config.GUITransparency
 mainFrame.Active = true
-mainFrame.ClipsDescendants = false
+mainFrame.ClipsDescendants = false -- ИСПРАВЛЕНО: Убрана обрезка для dropdown
 mainFrame.Visible = false
 mainFrame.Parent = gui
 
@@ -1350,6 +1516,202 @@ local mainStroke = Instance.new("UIStroke", mainFrame)
 mainStroke.Color = Color3.fromRGB(210, 210, 215)
 mainStroke.Thickness = 1
 mainStroke.Transparency = 0.5
+
+-- ════════════════════════════════════════════════════════════════
+-- MOBILE CONSOLE - ИСПРАВЛЕНО ПОЗИЦИОНИРОВАНИЕ
+-- ════════════════════════════════════════════════════════════════
+
+local mobileConsole = Instance.new("Frame")
+mobileConsole.Name = "MobileConsole"
+mobileConsole.Size = UDim2.new(0, 180, 0, 320)
+-- ИСПРАВЛЕНО: Теперь консоль полностью видна справа
+mobileConsole.Position = UDim2.new(1, -190, 0.5, -160)
+mobileConsole.AnchorPoint = Vector2.new(0, 0.5)
+mobileConsole.BackgroundColor3 = Color3.fromRGB(245, 245, 250)
+mobileConsole.BorderSizePixel = 0
+mobileConsole.BackgroundTransparency = 0.1
+mobileConsole.ZIndex = 10
+mobileConsole.Parent = gui
+
+local consoleCorner = Instance.new("UICorner", mobileConsole)
+consoleCorner.CornerRadius = UDim.new(0, 20)
+
+local consoleStroke = Instance.new("UIStroke", mobileConsole)
+consoleStroke.Color = Color3.fromRGB(210, 210, 215)
+consoleStroke.Thickness = 1
+consoleStroke.Transparency = 0.5
+
+local consoleTitle = Instance.new("TextLabel")
+consoleTitle.Size = UDim2.new(1, 0, 0, 40)
+consoleTitle.Position = UDim2.new(0, 0, 0, 0)
+consoleTitle.Text = "MOBILE CONSOLE"
+consoleTitle.TextColor3 = Color3.fromRGB(0, 0, 0)
+consoleTitle.TextSize = 14
+consoleTitle.Font = Enum.Font.GothamBold
+consoleTitle.BackgroundTransparency = 1
+consoleTitle.Parent = mobileConsole
+
+-- Speed Toggle Button
+local speedToggleBtn = Instance.new("TextButton")
+speedToggleBtn.Size = UDim2.new(0, 150, 0, 50)
+speedToggleBtn.Position = UDim2.new(0, 15, 0, 50)
+speedToggleBtn.BackgroundColor3 = isSpeedEnabled and Color3.fromRGB(52, 199, 89) or Color3.fromRGB(255, 59, 48)
+speedToggleBtn.Text = isSpeedEnabled and "SPEED: ON" or "SPEED: OFF"
+speedToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedToggleBtn.TextSize = 16
+speedToggleBtn.Font = Enum.Font.GothamBold
+speedToggleBtn.BorderSizePixel = 0
+speedToggleBtn.Parent = mobileConsole
+
+local speedBtnCorner = Instance.new("UICorner", speedToggleBtn)
+speedBtnCorner.CornerRadius = UDim.new(0, 12)
+
+speedToggleBtn.MouseButton1Click:Connect(function()
+    isSpeedEnabled = not isSpeedEnabled
+    updateSpeed()
+    
+    Services.TweenService:Create(speedToggleBtn, TweenInfo.new(0.2), {
+        BackgroundColor3 = isSpeedEnabled and Color3.fromRGB(52, 199, 89) or Color3.fromRGB(255, 59, 48)
+    }):Play()
+    
+    speedToggleBtn.Text = isSpeedEnabled and "SPEED: ON" or "SPEED: OFF"
+end)
+
+-- Speed + Button
+local speedPlusBtn = Instance.new("TextButton")
+speedPlusBtn.Size = UDim2.new(0, 70, 0, 50)
+speedPlusBtn.Position = UDim2.new(0, 15, 0, 110)
+speedPlusBtn.BackgroundColor3 = Color3.fromRGB(0, 122, 255)
+speedPlusBtn.Text = "+"
+speedPlusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedPlusBtn.TextSize = 24
+speedPlusBtn.Font = Enum.Font.GothamBold
+speedPlusBtn.BorderSizePixel = 0
+speedPlusBtn.Parent = mobileConsole
+
+local plusBtnCorner = Instance.new("UICorner", speedPlusBtn)
+plusBtnCorner.CornerRadius = UDim.new(0, 12)
+
+speedPlusBtn.MouseButton1Click:Connect(function()
+    currentWalkSpeed = math.min(currentWalkSpeed + 20, 500)
+    if isSpeedEnabled then
+        updateSpeed()
+    end
+    
+    Services.TweenService:Create(speedPlusBtn, TweenInfo.new(0.1), {
+        BackgroundColor3 = Color3.fromRGB(52, 199, 89)
+    }):Play()
+    wait(0.1)
+    Services.TweenService:Create(speedPlusBtn, TweenInfo.new(0.1), {
+        BackgroundColor3 = Color3.fromRGB(0, 122, 255)
+    }):Play()
+end)
+
+-- Speed - Button
+local speedMinusBtn = Instance.new("TextButton")
+speedMinusBtn.Size = UDim2.new(0, 70, 0, 50)
+speedMinusBtn.Position = UDim2.new(0, 95, 0, 110)
+speedMinusBtn.BackgroundColor3 = Color3.fromRGB(0, 122, 255)
+speedMinusBtn.Text = "-"
+speedMinusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedMinusBtn.TextSize = 24
+speedMinusBtn.Font = Enum.Font.GothamBold
+speedMinusBtn.BorderSizePixel = 0
+speedMinusBtn.Parent = mobileConsole
+
+local minusBtnCorner = Instance.new("UICorner", speedMinusBtn)
+minusBtnCorner.CornerRadius = UDim.new(0, 12)
+
+speedMinusBtn.MouseButton1Click:Connect(function()
+    currentWalkSpeed = math.max(currentWalkSpeed - 20, 16)
+    if isSpeedEnabled then
+        updateSpeed()
+    end
+    
+    Services.TweenService:Create(speedMinusBtn, TweenInfo.new(0.1), {
+        BackgroundColor3 = Color3.fromRGB(255, 59, 48)
+    }):Play()
+    wait(0.1)
+    Services.TweenService:Create(speedMinusBtn, TweenInfo.new(0.1), {
+        BackgroundColor3 = Color3.fromRGB(0, 122, 255)
+    }):Play()
+end)
+
+-- Speed Value Display
+local speedValueLabel = Instance.new("TextLabel")
+speedValueLabel.Size = UDim2.new(0, 150, 0, 35)
+speedValueLabel.Position = UDim2.new(0, 15, 0, 170)
+speedValueLabel.Text = "Speed: " .. currentWalkSpeed
+speedValueLabel.TextColor3 = Color3.fromRGB(0, 0, 0)
+speedValueLabel.TextSize = 14
+speedValueLabel.Font = Enum.Font.GothamBold
+speedValueLabel.BackgroundColor3 = Color3.fromRGB(242, 242, 247)
+speedValueLabel.BorderSizePixel = 0
+speedValueLabel.Parent = mobileConsole
+
+local speedValueCorner = Instance.new("UICorner", speedValueLabel)
+speedValueCorner.CornerRadius = UDim.new(0, 10)
+
+-- Update speed label
+Services.RunService.RenderStepped:Connect(function()
+    speedValueLabel.Text = "Speed: " .. currentWalkSpeed
+end)
+
+-- Silent Aim Toggle Button
+local silentAimBtn = Instance.new("TextButton")
+silentAimBtn.Size = UDim2.new(0, 150, 0, 50)
+silentAimBtn.Position = UDim2.new(0, 15, 0, 215)
+silentAimBtn.BackgroundColor3 = Config.Enabled and Color3.fromRGB(52, 199, 89) or Color3.fromRGB(255, 59, 48)
+silentAimBtn.Text = Config.Enabled and "AIM: ON" or "AIM: OFF"
+silentAimBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+silentAimBtn.TextSize = 16
+silentAimBtn.Font = Enum.Font.GothamBold
+silentAimBtn.BorderSizePixel = 0
+silentAimBtn.Parent = mobileConsole
+
+local aimBtnCorner = Instance.new("UICorner", silentAimBtn)
+aimBtnCorner.CornerRadius = UDim.new(0, 12)
+
+silentAimBtn.MouseButton1Click:Connect(function()
+    Config.Enabled = not Config.Enabled
+    
+    Services.TweenService:Create(silentAimBtn, TweenInfo.new(0.2), {
+        BackgroundColor3 = Config.Enabled and Color3.fromRGB(52, 199, 89) or Color3.fromRGB(255, 59, 48)
+    }):Play()
+    
+    silentAimBtn.Text = Config.Enabled and "AIM: ON" or "AIM: OFF"
+end)
+
+-- Hide/Show Console Button
+local consoleToggleBtn = Instance.new("TextButton")
+consoleToggleBtn.Size = UDim2.new(0, 40, 0, 40)
+consoleToggleBtn.Position = UDim2.new(1, -50, 0.5, -20)
+consoleToggleBtn.AnchorPoint = Vector2.new(0, 0.5)
+consoleToggleBtn.BackgroundColor3 = Config.AccentColor
+consoleToggleBtn.Text = "<"
+consoleToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+consoleToggleBtn.TextSize = 20
+consoleToggleBtn.Font = Enum.Font.GothamBold
+consoleToggleBtn.BorderSizePixel = 0
+consoleToggleBtn.ZIndex = 11
+consoleToggleBtn.Parent = gui
+
+local consoleToggleCorner = Instance.new("UICorner", consoleToggleBtn)
+consoleToggleCorner.CornerRadius = UDim.new(1, 0)
+
+local consoleVisible = true
+
+consoleToggleBtn.MouseButton1Click:Connect(function()
+    consoleVisible = not consoleVisible
+    
+    Services.TweenService:Create(mobileConsole, TweenInfo.new(0.3), {
+        Position = consoleVisible and UDim2.new(1, -190, 0.5, -160) or UDim2.new(1, 10, 0.5, -160)
+    }):Play()
+    
+    consoleToggleBtn.Text = consoleVisible and "<" or ">"
+end)
+
+-- ════════════════════════════════════════════════════════════════
 
 local closeButtonInside = Instance.new("TextButton")
 closeButtonInside.Size = UDim2.new(0, 45, 0, 45)
@@ -1373,7 +1735,7 @@ closeStrokeInside.Transparency = 0.5
 
 local floatingButton = Instance.new("TextButton")
 floatingButton.Size = UDim2.new(0, 60, 0, 60)
-floatingButton.Position = UDim2.new(1, -75, 1, -75)
+floatingButton.Position = UDim2.new(0, 10, 1, -75)
 floatingButton.BackgroundColor3 = Config.AccentColor
 floatingButton.Text = "F"
 floatingButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1398,28 +1760,59 @@ shadow.Parent = gui
 local shadowCorner = Instance.new("UICorner", shadow)
 shadowCorner.CornerRadius = UDim.new(1, 0)
 
+-- Touch support for floating button
 local isDraggingFloatingButton = false
 local dragStartPos = nil
 local buttonStartPos = nil
+local lastTapTime = 0
+local DOUBLE_TAP_THRESHOLD = 0.3
 
-floatingButton.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+local function handleFloatingButtonInput(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or
+        input.UserInputType == Enum.UserInputType.Touch then
         isDraggingFloatingButton = true
-        dragStartPos = Services.UserInputService:GetMouseLocation()
+        dragStartPos = input.Position
         buttonStartPos = floatingButton.Position
     end
-end)
+end
 
-Services.UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+local function handleFloatingButtonEnd(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or
+        input.UserInputType == Enum.UserInputType.Touch then
+        if isDraggingFloatingButton then
+            local dragDistance = (input.Position - dragStartPos).Magnitude
+            if dragDistance < 10 then
+                -- Это клик/тап, а не драг
+                mainFrame.Visible = true
+                
+                mainFrame.Size = UDim2.new(0, 0, 0, 0)
+                mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+                
+                Services.TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                    Size = UDim2.new(0, Config.GUISize.Width, 0, Config.GUISize.Height),
+                    Position = UDim2.new(0.5, -Config.GUISize.Width/2, 0.5, -Config.GUISize.Height/2)
+                }):Play()
+                
+                Services.TweenService:Create(blurEffect, TweenInfo.new(0.3), {
+                    Size = 15
+                }):Play()
+                
+                Services.TweenService:Create(floatingButton, TweenInfo.new(0.3), {
+                    BackgroundColor3 = Color3.fromRGB(142, 142, 147)
+                }):Play()
+            end
+        end
         isDraggingFloatingButton = false
     end
-end)
+end
 
-Services.RunService.RenderStepped:Connect(function()
-    if isDraggingFloatingButton then
-        local currentMouse = Services.UserInputService:GetMouseLocation()
-        local delta = currentMouse - dragStartPos
+floatingButton.InputBegan:Connect(handleFloatingButtonInput)
+floatingButton.InputEnded:Connect(handleFloatingButtonEnd)
+
+Services.UserInputService.InputChanged:Connect(function(input)
+    if isDraggingFloatingButton and (input.UserInputType == Enum.UserInputType.MouseMovement or
+        input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStartPos
         
         floatingButton.Position = UDim2.new(
             buttonStartPos.X.Scale,
@@ -1429,28 +1822,6 @@ Services.RunService.RenderStepped:Connect(function()
         )
         
         shadow.Position = floatingButton.Position + UDim2.new(0, 2, 0, 2)
-    end
-end)
-
-floatingButton.MouseButton1Click:Connect(function()
-    if not isDraggingFloatingButton or (Services.UserInputService:GetMouseLocation() - dragStartPos).Magnitude < 5 then
-        mainFrame.Visible = true
-        
-        mainFrame.Size = UDim2.new(0, 0, 0, 0)
-        mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-        
-        Services.TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-            Size = UDim2.new(0, Config.GUISize.Width, 0, Config.GUISize.Height),
-            Position = UDim2.new(0.5, -Config.GUISize.Width/2, 0.5, -Config.GUISize.Height/2)
-        }):Play()
-        
-        Services.TweenService:Create(blurEffect, TweenInfo.new(0.3), {
-            Size = 15
-        }):Play()
-        
-        Services.TweenService:Create(floatingButton, TweenInfo.new(0.3), {
-            BackgroundColor3 = Color3.fromRGB(142, 142, 147)
-        }):Play()
     end
 end)
 
@@ -1519,28 +1890,35 @@ title.BackgroundTransparency = 1
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = titleBar
 
+-- Touch support for dragging
 local dragging = false
 local dragStart = nil
 local startPosFrame = nil
 
-titleBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+local function handleTitleBarInput(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or
+        input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
-        dragStart = Services.UserInputService:GetMouseLocation()
+        dragStart = input.Position
         startPosFrame = mainFrame.Position
     end
-end)
+end
 
-Services.UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+local function handleTitleBarEnd(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or
+        input.UserInputType == Enum.UserInputType.Touch then
         dragging = false
     end
-end)
+end
 
-Services.RunService.RenderStepped:Connect(function()
-    if dragging and not isDraggingFloatingButton then
-        local currentMouse = Services.UserInputService:GetMouseLocation()
-        local delta = currentMouse - dragStart
+titleBar.InputBegan:Connect(handleTitleBarInput)
+titleBar.InputEnded:Connect(handleTitleBarEnd)
+
+Services.UserInputService.InputChanged:Connect(function(input)
+    if dragging and not isDraggingFloatingButton and
+        (input.UserInputType == Enum.UserInputType.MouseMovement or
+         input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
         mainFrame.Position = UDim2.new(
             startPosFrame.X.Scale,
             startPosFrame.X.Offset + delta.X,
@@ -1558,6 +1936,7 @@ scrollFrame.BorderSizePixel = 0
 scrollFrame.ScrollBarThickness = 6
 scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
 scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(142, 142, 147)
+scrollFrame.ClipsDescendants = true -- ScrollFrame должен обрезать контент
 scrollFrame.Parent = mainFrame
 
 local scrollLayout = Instance.new("UIListLayout")
@@ -1576,6 +1955,10 @@ local function updateGUIColors(newColor)
     MultipointCircle.Color = newColor
     
     Services.TweenService:Create(floatingButton, TweenInfo.new(0.3), {
+        BackgroundColor3 = newColor
+    }):Play()
+    
+    Services.TweenService:Create(consoleToggleBtn, TweenInfo.new(0.3), {
         BackgroundColor3 = newColor
     }):Play()
     
@@ -1693,6 +2076,7 @@ local function createModuleSection(title, order)
     return section
 end
 
+-- MOBILE OPTIMIZED SLIDER WITH TOUCH SUPPORT
 local function createModernSlider(name, order, min, max, defaultValue, callback, isDecimal)
     local sliderFrame = Instance.new("Frame")
     sliderFrame.Size = UDim2.new(0, scrollFrame.AbsoluteSize.X - 12, 0, 75)
@@ -1751,34 +2135,42 @@ local function createModernSlider(name, order, min, max, defaultValue, callback,
     sliderFillCorner.CornerRadius = UDim.new(1, 0)
     
     local dragging = false
+    
+    local function updateSlider(input)
+        local relX = math.clamp((input.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
+        
+        Services.TweenService:Create(sliderFill, TweenInfo.new(0.1), {
+            Size = UDim2.new(relX, 0, 1, 0)
+        }):Play()
+        
+        local value = min + (max - min) * relX
+        if not isDecimal then
+            value = math.floor(value)
+        end
+        
+        valueLabel.Text = isDecimal and string.format("%.2f", value) or tostring(value)
+        callback(value)
+    end
+    
     sliderBg.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or
+            input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
+            updateSlider(input)
         end
     end)
     
-    Services.UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+    sliderBg.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or
+            input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
     
-    Services.RunService.RenderStepped:Connect(function()
-        if dragging then
-            local mousePos = Services.UserInputService:GetMouseLocation()
-            local relX = math.clamp((mousePos.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
-            
-            Services.TweenService:Create(sliderFill, TweenInfo.new(0.1), {
-                Size = UDim2.new(relX, 0, 1, 0)
-            }):Play()
-            
-            local value = min + (max - min) * relX
-            if not isDecimal then
-                value = math.floor(value)
-            end
-            
-            valueLabel.Text = isDecimal and string.format("%.2f", value) or tostring(value)
-            callback(value)
+    Services.UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or
+            input.UserInputType == Enum.UserInputType.Touch) then
+            updateSlider(input)
         end
     end)
     
@@ -1849,6 +2241,7 @@ local function createCompactToggle(name, order, defaultValue, callback)
     return toggleFrame
 end
 
+-- ИСПРАВЛЕННЫЙ DROPDOWN - ТЕПЕРЬ СПИСОК ОТОБРАЖАЕТСЯ ПОВЕРХ ВСЕХ ЭЛЕМЕНТОВ
 local function createDropdown(name, order, options, defaultValue, callback)
     local dropdownFrame = Instance.new("Frame")
     dropdownFrame.Size = UDim2.new(0, scrollFrame.AbsoluteSize.X - 12, 0, 52)
@@ -1856,7 +2249,7 @@ local function createDropdown(name, order, options, defaultValue, callback)
     dropdownFrame.BorderSizePixel = 0
     dropdownFrame.BackgroundTransparency = 0.3
     dropdownFrame.LayoutOrder = order
-    dropdownFrame.ClipsDescendants = false
+    dropdownFrame.ClipsDescendants = false -- ИСПРАВЛЕНО: Не обрезаем dropdown
     dropdownFrame.Parent = scrollFrame
     
     local dropdownCorner = Instance.new("UICorner", dropdownFrame)
@@ -1888,36 +2281,67 @@ local function createDropdown(name, order, options, defaultValue, callback)
     local selectedCorner = Instance.new("UICorner", selectedBtn)
     selectedCorner.CornerRadius = UDim.new(0, 10)
     
+    -- ИСПРАВЛЕНО: Создаем optionsFrame как дочерний для GUI, а не dropdownFrame
     local optionsFrame = Instance.new("Frame")
-    optionsFrame.Size = UDim2.new(0.6, -16, 0, 0)
-    optionsFrame.Position = UDim2.new(0.4, 0, 1, 4)
+    optionsFrame.Size = UDim2.new(0, 0, 0, 0)
     optionsFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     optionsFrame.BorderSizePixel = 0
     optionsFrame.Visible = false
-    optionsFrame.ClipsDescendants = true
-    optionsFrame.ZIndex = 100
-    optionsFrame.Parent = dropdownFrame
+    optionsFrame.ClipsDescendants = false
+    optionsFrame.ZIndex = 200 -- ИСПРАВЛЕНО: Очень высокий ZIndex
+    optionsFrame.Parent = gui -- ИСПРАВЛЕНО: Родитель - gui, а не dropdownFrame
     
     local optionsCorner = Instance.new("UICorner", optionsFrame)
     optionsCorner.CornerRadius = UDim.new(0, 12)
     
-    local optionsLayout = Instance.new("UIListLayout", optionsFrame)
+    local optionsStroke = Instance.new("UIStroke", optionsFrame)
+    optionsStroke.Color = Color3.fromRGB(210, 210, 215)
+    optionsStroke.Thickness = 1
+    optionsStroke.Transparency = 0.5
+    
+    local optionsScrollFrame = Instance.new("ScrollingFrame")
+    optionsScrollFrame.Size = UDim2.new(1, -4, 1, -4)
+    optionsScrollFrame.Position = UDim2.new(0, 2, 0, 2)
+    optionsScrollFrame.BackgroundTransparency = 1
+    optionsScrollFrame.BorderSizePixel = 0
+    optionsScrollFrame.ScrollBarThickness = 4
+    optionsScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+    optionsScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(142, 142, 147)
+    optionsScrollFrame.ZIndex = 201
+    optionsScrollFrame.Parent = optionsFrame
+    
+    local optionsLayout = Instance.new("UIListLayout", optionsScrollFrame)
     optionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
     optionsLayout.Padding = UDim.new(0, 2)
     
     local isOpen = false
     
+    -- Функция обновления позиции optionsFrame
+    local function updateOptionsPosition()
+        local btnAbsPos = selectedBtn.AbsolutePosition
+        local btnAbsSize = selectedBtn.AbsoluteSize
+        
+        -- ИСПРАВЛЕНО: Позиционируем относительно кнопки
+        optionsFrame.Position = UDim2.new(0, btnAbsPos.X, 0, btnAbsPos.Y + btnAbsSize.Y + 4)
+        optionsFrame.Size = UDim2.new(0, btnAbsSize.X, 0, math.min(#options * 38 + 4, 300))
+    end
+    
     selectedBtn.MouseButton1Click:Connect(function()
         isOpen = not isOpen
         
         if isOpen then
+            updateOptionsPosition()
             optionsFrame.Visible = true
+            
+            -- Обновляем canvas size
+            optionsScrollFrame.CanvasSize = UDim2.new(0, 0, 0, #options * 38 + 4)
+            
             Services.TweenService:Create(optionsFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                Size = UDim2.new(0.6, -16, 0, #options * 38 + 4)
+                Size = UDim2.new(0, optionsFrame.AbsoluteSize.X, 0, math.min(#options * 38 + 4, 300))
             }):Play()
         else
             Services.TweenService:Create(optionsFrame, TweenInfo.new(0.2), {
-                Size = UDim2.new(0.6, -16, 0, 0)
+                Size = UDim2.new(0, optionsFrame.AbsoluteSize.X, 0, 0)
             }):Play()
             wait(0.2)
             optionsFrame.Visible = false
@@ -1935,7 +2359,8 @@ local function createDropdown(name, order, options, defaultValue, callback)
         optionBtn.Font = Enum.Font.Gotham
         optionBtn.BorderSizePixel = 0
         optionBtn.LayoutOrder = i
-        optionBtn.Parent = optionsFrame
+        optionBtn.ZIndex = 202
+        optionBtn.Parent = optionsScrollFrame
         
         local optionCorner = Instance.new("UICorner", optionBtn)
         optionCorner.CornerRadius = UDim.new(0, 8)
@@ -1944,7 +2369,7 @@ local function createDropdown(name, order, options, defaultValue, callback)
             selectedBtn.Text = option
             callback(option)
             
-            for _, btn in pairs(optionsFrame:GetChildren()) do
+            for _, btn in pairs(optionsScrollFrame:GetChildren()) do
                 if btn:IsA("TextButton") then
                     Services.TweenService:Create(btn, TweenInfo.new(0.2), {
                         BackgroundColor3 = Color3.fromRGB(242, 242, 247),
@@ -1960,12 +2385,39 @@ local function createDropdown(name, order, options, defaultValue, callback)
             
             isOpen = false
             Services.TweenService:Create(optionsFrame, TweenInfo.new(0.2), {
-                Size = UDim2.new(0.6, -16, 0, 0)
+                Size = UDim2.new(0, optionsFrame.AbsoluteSize.X, 0, 0)
             }):Play()
             wait(0.2)
             optionsFrame.Visible = false
         end)
     end
+    
+    -- Закрытие dropdown при клике вне его
+    Services.UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+           input.UserInputType == Enum.UserInputType.Touch then
+            if isOpen then
+                local mousePos = Services.UserInputService:GetMouseLocation()
+                local optionsPos = optionsFrame.AbsolutePosition
+                local optionsSize = optionsFrame.AbsoluteSize
+                local btnPos = selectedBtn.AbsolutePosition
+                local btnSize = selectedBtn.AbsoluteSize
+                
+                -- Проверяем, кликнул ли вне dropdown
+                if not (mousePos.X >= optionsPos.X and mousePos.X <= optionsPos.X + optionsSize.X and
+                       mousePos.Y >= optionsPos.Y and mousePos.Y <= optionsPos.Y + optionsSize.Y) and
+                   not (mousePos.X >= btnPos.X and mousePos.X <= btnPos.X + btnSize.X and
+                       mousePos.Y >= btnPos.Y and mousePos.Y <= btnPos.Y + btnSize.Y) then
+                    isOpen = false
+                    Services.TweenService:Create(optionsFrame, TweenInfo.new(0.2), {
+                        Size = UDim2.new(0, optionsFrame.AbsoluteSize.X, 0, 0)
+                    }):Play()
+                    wait(0.2)
+                    optionsFrame.Visible = false
+                end
+            end
+        end
+    end)
     
     return dropdownFrame
 end
