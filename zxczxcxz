@@ -925,7 +925,7 @@ end
 local function getClosestPart(character)
     if not character then return nil, nil end
     
-    if Config.HitPart ~= "Closest Point" then
+    if Config.HitPart ~= "Closest Part" then
         local part = character:FindFirstChild(Config.HitPart)
         if part and part:IsA("BasePart") then
             return part, part.Position
@@ -1011,6 +1011,10 @@ local function updateTarget()
         local part, hitPoint = getClosestPart(player.Character)
         
         if part and hitPoint then
+            if Config.VisibleCheck and not isVisible(part) then
+                continue
+            end
+            
             local screenPos, onScreen = Camera:WorldToViewportPoint(hitPoint)
             if not onScreen then continue end
             
@@ -2061,7 +2065,7 @@ shutdownBtn.MouseButton1Click:Connect(function()
     shutdownBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 30)
     
     scriptEnabled = false
-        wait(0.5)
+    wait(0.5)
     
     Services.TweenService:Create(mainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
         Size = UDim2.new(0, 0, 0, 0),
@@ -2088,6 +2092,11 @@ shutdownBtn.MouseButton1Click:Connect(function()
     pcall(function() FOVCircle:Remove() end)
     pcall(function() TargetIndicator:Remove() end)
     
+    -- Удаление ESP объектов
+    for player, esp in pairs(ESPObjects) do
+        removeESP(player)
+    end
+    
     -- Восстановление оригинальной скорости
     if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
         local humanoid = LocalPlayer.Character.Humanoid
@@ -2099,7 +2108,9 @@ shutdownBtn.MouseButton1Click:Connect(function()
     print("[FENNIXXX Lite] Script successfully shut down")
 end)
 
+-- ════════════════════════════════════════════════════════════════
 -- СОЗДАНИЕ UI ЭЛЕМЕНТОВ
+-- ════════════════════════════════════════════════════════════════
 
 createModuleSection("Combat", 1)
 
@@ -2121,10 +2132,12 @@ end).Parent = gridContainer1
 
 createCircleButton("Team Check", 2, Config.TeamCheck, function(value)
     Config.TeamCheck = value
+    teamCheckCache = {} -- Очистка кэша при изменении
 end).Parent = gridContainer1
 
 createCircleButton("Wall Check", 3, Config.WallCheck, function(value)
     Config.WallCheck = value
+    wallCheckCache = {} -- Очистка кэша при изменении
 end).Parent = gridContainer1
 
 createCircleButton("Show FOV", 4, Config.ShowFOV, function(value)
@@ -2135,23 +2148,41 @@ createCircleButton("Resolver", 5, Config.Resolver, function(value)
     Config.Resolver = value
 end).Parent = gridContainer1
 
-createCircleButton("Knocked Check", 6, Config.KnockedCheck, function(value)
+createCircleButton("KO Check", 6, Config.KnockedCheck, function(value)
     Config.KnockedCheck = value
+    knockedCache = {} -- Очистка кэша при изменении
 end).Parent = gridContainer1
 
-createModuleSection("Combat Settings", 3)
+-- Добавляем Visible Check в следующий ряд
+local gridContainer1_2 = Instance.new("Frame")
+gridContainer1_2.Size = UDim2.new(0, scrollFrame.AbsoluteSize.X - 12, 0, 150)
+gridContainer1_2.BackgroundTransparency = 1
+gridContainer1_2.LayoutOrder = 3
+gridContainer1_2.Parent = scrollFrame
 
-createModernSlider("FOV Size", 4, 20, 500, Config.FOVSize, function(value)
+local gridLayout1_2 = Instance.new("UIGridLayout")
+gridLayout1_2.CellSize = UDim2.new(0, 120, 0, 135)
+gridLayout1_2.CellPadding = UDim2.new(0, 15, 0, 15)
+gridLayout1_2.HorizontalAlignment = Enum.HorizontalAlignment.Center
+gridLayout1_2.Parent = gridContainer1_2
+
+createCircleButton("Visible Check", 1, Config.VisibleCheck, function(value)
+    Config.VisibleCheck = value
+end).Parent = gridContainer1_2
+
+createModuleSection("Combat Settings", 4)
+
+createModernSlider("FOV Size", 5, 20, 500, Config.FOVSize, function(value)
     Config.FOVSize = value
 end, false)
 
-createModernSlider("Max Distance", 5, 100, 1000, Config.MaxDistance, function(value)
+createModernSlider("Max Distance", 6, 100, 1000, Config.MaxDistance, function(value)
     Config.MaxDistance = value
     Config.CurrentMaxDistance = value
 end, false)
 
 -- УЛУЧШЕННЫЙ DROPDOWN ДЛЯ TARGET PART С ВСЕМИ ЧАСТЯМИ ТЕЛА
-createImprovedDropdown("Target Part", 6, {
+createImprovedDropdown("Target Part", 7, {
     "Closest Part",
     "Head",
     "UpperTorso",
@@ -2175,24 +2206,24 @@ createImprovedDropdown("Target Part", 6, {
     cachedTargetPoint = nil
 end)
 
-createKeybindPicker("Silent Aim Key", 7, Config.Keybind, function(key)
+createKeybindPicker("Silent Aim Key", 8, Config.Keybind, function(key)
     Config.Keybind = key
 end)
 
-createModuleSection("Rapid Fire", 8)
+createModuleSection("Rapid Fire", 9)
 
-createCompactToggle("Rapid Fire", 9, Config.RapidFire, function(value)
+createCompactToggle("Rapid Fire", 10, Config.RapidFire, function(value)
     Config.RapidFire = value
     setupRapidFire()
 end)
 
-createModernSlider("Fire Delay", 10, 0.01, 0.5, Config.RapidFireDelay, function(value)
+createModernSlider("Fire Delay", 11, 0.01, 0.5, Config.RapidFireDelay, function(value)
     Config.RapidFireDelay = value
 end, true)
 
-createModuleSection("Walk Speed", 11)
+createModuleSection("Walk Speed", 12)
 
-createCompactToggle("Speed Enabled", 12, isSpeedEnabled, function(value)
+createCompactToggle("Speed Enabled", 13, isSpeedEnabled, function(value)
     isSpeedEnabled = value
     if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
         saveOriginalSpeed()
@@ -2200,23 +2231,23 @@ createCompactToggle("Speed Enabled", 12, isSpeedEnabled, function(value)
     end
 end)
 
-createModernSlider("Walk Speed", 13, 16, 500, currentWalkSpeed, function(value)
+createModernSlider("Walk Speed", 14, 16, 500, currentWalkSpeed, function(value)
     currentWalkSpeed = value
     if isSpeedEnabled then
         updateSpeed()
     end
 end, false)
 
-createKeybindPicker("Speed Toggle Key", 14, currentSpeedKeybind, function(key)
+createKeybindPicker("Speed Toggle Key", 15, currentSpeedKeybind, function(key)
     currentSpeedKeybind = key
 end)
 
-createModuleSection("ESP Settings", 15)
+createModuleSection("ESP Settings", 16)
 
 local gridContainer2 = Instance.new("Frame")
 gridContainer2.Size = UDim2.new(0, scrollFrame.AbsoluteSize.X - 12, 0, 290)
 gridContainer2.BackgroundTransparency = 1
-gridContainer2.LayoutOrder = 16
+gridContainer2.LayoutOrder = 17
 gridContainer2.Parent = scrollFrame
 
 local gridLayout2 = Instance.new("UIGridLayout")
@@ -2249,45 +2280,49 @@ createCircleButton("Skeleton", 6, Config.ESP.ShowSkeleton, function(value)
     Config.ESP.ShowSkeleton = value
 end).Parent = gridContainer2
 
-createModuleSection("ESP Colors", 17)
+createModuleSection("ESP Colors", 18)
 
-createColorPicker("Box Color", 18, Config.ESP.BoxColor, function(color)
+createColorPicker("Box Color", 19, Config.ESP.BoxColor, function(color)
     Config.ESP.BoxColor = color
 end, true)
 
-createColorPicker("Name Color", 19, Config.ESP.NameColor, function(color)
+createColorPicker("Name Color", 20, Config.ESP.NameColor, function(color)
     Config.ESP.NameColor = color
 end, true)
 
-createColorPicker("Distance Color", 20, Config.ESP.DistanceColor, function(color)
+createColorPicker("Distance Color", 21, Config.ESP.DistanceColor, function(color)
     Config.ESP.DistanceColor = color
 end, true)
 
-createColorPicker("Skeleton Color", 21, Config.ESP.SkeletonColor, function(color)
+createColorPicker("Skeleton Color", 22, Config.ESP.SkeletonColor, function(color)
     Config.ESP.SkeletonColor = color
 end, true)
 
-createModernSlider("ESP Distance", 22, 100, 1000, Config.ESP.MaxDistance, function(value)
+createModernSlider("ESP Distance", 23, 100, 1000, Config.ESP.MaxDistance, function(value)
     Config.ESP.MaxDistance = value
 end, false)
 
-createCompactToggle("ESP Team Check", 23, Config.ESP.TeamCheck, function(value)
+createCompactToggle("ESP Team Check", 24, Config.ESP.TeamCheck, function(value)
     Config.ESP.TeamCheck = value
 end)
 
-createModuleSection("GUI Settings", 24)
+createModuleSection("GUI Settings", 25)
 
-createColorPicker("GUI Accent Color", 25, Config.AccentColor, function(color)
+createColorPicker("GUI Accent Color", 26, Config.AccentColor, function(color)
     updateGUIColors(color)
 end, false)
 
-createKeybindPicker("Toggle GUI", 26, Config.GUIToggleKey, function(key)
+createKeybindPicker("Toggle GUI", 27, Config.GUIToggleKey, function(key)
     Config.GUIToggleKey = key
 end)
 
-createCompactToggle("Show Targeting", 27, Config.ShowTargeting, function(value)
+createCompactToggle("Show Targeting", 28, Config.ShowTargeting, function(value)
     Config.ShowTargeting = value
 end)
+
+-- ════════════════════════════════════════════════════════════════
+-- GUI TOGGLE LOGIC
+-- ════════════════════════════════════════════════════════════════
 
 Services.UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
@@ -2319,6 +2354,10 @@ Services.UserInputService.InputBegan:Connect(function(input, processed)
     end
 end)
 
+-- ════════════════════════════════════════════════════════════════
+-- INITIAL GUI ANIMATION
+-- ════════════════════════════════════════════════════════════════
+
 wait(0.5)
 mainFrame.Visible = true
 mainFrame.Size = UDim2.new(0, 0, 0, 0)
@@ -2335,6 +2374,7 @@ Services.TweenService:Create(blurEffect, TweenInfo.new(0.4), {
 
 print("[FENNIXXX Lite] Successfully loaded!")
 print("[FENNIXXX Lite] Press " .. Config.GUIToggleKey.Name .. " to toggle GUI")
+print("[FENNIXXX Lite] KO Check and Visible Check are now available in Combat section")
 
 end
 
