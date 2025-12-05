@@ -1,0 +1,447 @@
+ --[[
+    ███████╗███████╗███╗   ███╗███╗   ██╗██╗██╗  ██╗██╗  ██╗██╗  ██╗
+    ██╔════╝██╔════╝████╗ ████║████╗  ██║██║╚██╗██╔╝╚██╗██╔╝╚██╗██╔╝
+    █████╗  █████╗  ██╔████╔██║██╔██╗ ██║██║ ╚███╔╝  ╚███╔╝  ╚███╔╝ 
+    ██╔══╝  ██╔══╝  ██║╚██╔╝██║██║╚██╗██║██║ ██╔██╗  ██╔██╗  ██╔██╗ 
+    ██║     ███████╗██║ ╚═╝ ██║██║ ╚████║██║██╔╝ ██╗██╔╝ ██╗██╔╝ ██╗
+    ╚═╝     ╚══════╝╚═╝     ╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝
+              iOS 18 CONTROL CENTER STYLE - ULTRA FIXED V7
+    Made with ❤ by FENNIXXX Team
+]]
+
+-- ════════════════════════════════════════════════════════════════
+-- CORE SERVICES
+-- ════════════════════════════════════════════════════════════════
+
+local Services = {
+    Players = game:GetService("Players"),
+    RunService = game:GetService("RunService"),
+    UserInputService = game:GetService("UserInputService"),
+    TweenService = game:GetService("TweenService"),
+    Workspace = game:GetService("Workspace"),
+    CoreGui = game:GetService("CoreGui"),
+    HttpService = game:GetService("HttpService"),
+    ReplicatedStorage = game:GetService("ReplicatedStorage")
+}
+
+local LocalPlayer = Services.Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+--- KeyAuth Configuration
+local KeyAuthApp = "FENNIXXX"
+local KeyAuthOwnerID = "6oOmPZgEug"
+local KeyAuthVersion = "1.0"
+local KeyAuthURL = "https://keyauth.win/api/1.2/"
+
+local isAuthorized = false
+local sessionID = ""
+local scriptEnabled = true
+
+local function getHWID()
+    local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
+    return hwid
+end
+
+local function initKeyAuth()
+    local success, response = pcall(function()
+        return request({
+            Url = KeyAuthURL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/x-www-form-urlencoded"
+            },
+            Body = "type=init&ver=" .. KeyAuthVersion .. "&name=" .. KeyAuthApp .. "&ownerid=" .. KeyAuthOwnerID
+        })
+    end)
+    
+    if not success then
+        return false, "Connection failed"
+    end
+    
+    if response.StatusCode == 200 then
+        local decodeSuccess, data = pcall(function()
+            return Services.HttpService:JSONDecode(response.Body)
+        end)
+        
+        if decodeSuccess then
+            if data.success then
+                sessionID = data.sessionid
+                return true, "Initialized"
+            else
+                return false, data.message or "Init failed"
+            end
+        else
+            return false, "Invalid response"
+        end
+    else
+        return false, "Server error: " .. response.StatusCode
+    end
+end
+
+local function verifyLicense(key)
+    if not sessionID or sessionID == "" then
+        local initSuccess, initMsg = initKeyAuth()
+        if not initSuccess then
+            return false, "Failed to initialize: " .. initMsg
+        end
+        wait(0.5)
+    end
+    
+    local hwid = getHWID()
+    
+    local success, response = pcall(function()
+        return request({
+            Url = KeyAuthURL,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/x-www-form-urlencoded"
+            },
+            Body = "type=license&key=" .. Services.HttpService:UrlEncode(key) ..
+                    "&sessionid=" .. sessionID ..
+                    "&name=" .. KeyAuthApp ..
+                    "&ownerid=" .. KeyAuthOwnerID ..
+                    "&hwid=" .. hwid
+        })
+    end)
+    
+    if not success then
+        return false, "Connection failed"
+    end
+    
+    if response.StatusCode == 200 then
+        local decodeSuccess, data = pcall(function()
+            return Services.HttpService:JSONDecode(response.Body)
+        end)
+        
+        if decodeSuccess then
+            if data.success then
+                local exp = "Lifetime"
+                if data.info and data.info.subscriptions then
+                    for _, sub in pairs(data.info.subscriptions) do
+                        if sub.expiry and sub.expiry ~= "lifetime" then
+                            exp = os.date("%m/%d/%Y %H:%M", tonumber(sub.expiry))
+                        end
+                    end
+                end
+                return true, "License verified! Expires: " .. exp
+            else
+                return false, data.message or "Invalid license key"
+            end
+        else
+            return false, "Invalid response from server"
+        end
+    else
+        return false, "Server error: " .. response.StatusCode
+    end
+end
+
+local function createAuthGUI()
+    local authGui = Instance.new("ScreenGui")
+    authGui.Name = "KeyAuthGUI"
+    authGui.IgnoreGuiInset = true
+    authGui.ResetOnSpawn = false
+    authGui.Parent = Services.CoreGui
+    
+    local darkBackground = Instance.new("Frame")
+    darkBackground.Size = UDim2.new(1, 0, 1, 0)
+    darkBackground.Position = UDim2.new(0, 0, 0, 0)
+    darkBackground.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    darkBackground.BorderSizePixel = 0
+    darkBackground.BackgroundTransparency = 0.3
+    darkBackground.Parent = authGui
+    
+    local authFrame = Instance.new("Frame")
+    authFrame.Size = UDim2.new(0, 380, 0, 460)
+    authFrame.Position = UDim2.new(0.5, -190, 0.5, -230)
+    authFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    authFrame.BorderSizePixel = 0
+    authFrame.BackgroundTransparency = 0.1
+    authFrame.Parent = authGui
+    
+    local authCorner = Instance.new("UICorner", authFrame)
+    authCorner.CornerRadius = UDim.new(0, 28)
+    
+    local authStroke = Instance.new("UIStroke", authFrame)
+    authStroke.Color = Color3.fromRGB(200, 200, 200)
+    authStroke.Thickness = 1
+    authStroke.Transparency = 0.7
+    
+    local logoText = Instance.new("TextLabel")
+    logoText.Size = UDim2.new(1, 0, 0, 70)
+    logoText.Position = UDim2.new(0, 0, 0, 30)
+    logoText.Text = "FENNIXXX"
+    logoText.TextColor3 = Color3.fromRGB(60, 60, 67)
+    logoText.TextSize = 34
+    logoText.Font = Enum.Font.GothamBold
+    logoText.BackgroundTransparency = 1
+    logoText.Parent = authFrame
+    
+    local subtitleLabel = Instance.new("TextLabel")
+    subtitleLabel.Size = UDim2.new(1, 0, 0, 25)
+    subtitleLabel.Position = UDim2.new(0, 0, 0, 100)
+    subtitleLabel.Text = "License Verification"
+    subtitleLabel.TextColor3 = Color3.fromRGB(142, 142, 147)
+    subtitleLabel.TextSize = 14
+    subtitleLabel.Font = Enum.Font.Gotham
+    subtitleLabel.BackgroundTransparency = 1
+    subtitleLabel.Parent = authFrame
+    
+    local hwidLabel = Instance.new("TextLabel")
+    hwidLabel.Size = UDim2.new(1, -100, 0, 18)
+    hwidLabel.Position = UDim2.new(0, 25, 0, 150)
+    hwidLabel.Text = "HWID: " .. getHWID()
+    hwidLabel.TextColor3 = Color3.fromRGB(142, 142, 147)
+    hwidLabel.TextSize = 10
+    hwidLabel.Font = Enum.Font.Gotham
+    hwidLabel.BackgroundTransparency = 1
+    hwidLabel.TextXAlignment = Enum.TextXAlignment.Left
+    hwidLabel.TextScaled = false
+    hwidLabel.TextWrapped = true
+    hwidLabel.Parent = authFrame
+    
+    local copyHWIDBtn = Instance.new("TextButton")
+    copyHWIDBtn.Size = UDim2.new(0, 65, 0, 26)
+    copyHWIDBtn.Position = UDim2.new(1, -90, 0, 147)
+    copyHWIDBtn.BackgroundColor3 = Color3.fromRGB(0, 122, 255)
+    copyHWIDBtn.Text = "Copy"
+    copyHWIDBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    copyHWIDBtn.TextSize = 12
+    copyHWIDBtn.Font = Enum.Font.GothamMedium
+    copyHWIDBtn.BorderSizePixel = 0
+    copyHWIDBtn.Parent = authFrame
+    
+    local copyCorner = Instance.new("UICorner", copyHWIDBtn)
+    copyCorner.CornerRadius = UDim.new(0, 8)
+    
+    copyHWIDBtn.MouseButton1Click:Connect(function()
+        setclipboard(getHWID())
+        copyHWIDBtn.Text = "Copied!"
+        copyHWIDBtn.BackgroundColor3 = Color3.fromRGB(52, 199, 89)
+        wait(1.5)
+        copyHWIDBtn.Text = "Copy"
+        copyHWIDBtn.BackgroundColor3 = Color3.fromRGB(0, 122, 255)
+    end)
+    
+    local keyBox = Instance.new("TextBox")
+    keyBox.Size = UDim2.new(0, 330, 0, 45)
+    keyBox.Position = UDim2.new(0.5, -165, 0, 195)
+    keyBox.BackgroundColor3 = Color3.fromRGB(242, 242, 247)
+    keyBox.Text = ""
+    keyBox.PlaceholderText = "Enter License Key"
+    keyBox.PlaceholderColor3 = Color3.fromRGB(174, 174, 178)
+    keyBox.TextColor3 = Color3.fromRGB(0, 0, 0)
+    keyBox.TextSize = 15
+    keyBox.Font = Enum.Font.Gotham
+    keyBox.BorderSizePixel = 0
+    keyBox.ClearTextOnFocus = false
+    keyBox.TextScaled = false
+    keyBox.TextWrapped = false
+    keyBox.TextXAlignment = Enum.TextXAlignment.Left
+    keyBox.ClipsDescendants = true
+    keyBox.Parent = authFrame
+    
+    local keyBoxCorner = Instance.new("UICorner", keyBox)
+    keyBoxCorner.CornerRadius = UDim.new(0, 12)
+    
+    local keyBoxPadding = Instance.new("UIPadding", keyBox)
+    keyBoxPadding.PaddingLeft = UDim.new(0, 15)
+    keyBoxPadding.PaddingRight = UDim.new(0, 15)
+    
+    keyBox.Focused:Connect(function()
+        Services.TweenService:Create(keyBox, TweenInfo.new(0.2), {
+            BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        }):Play()
+    end)
+    
+    keyBox.FocusLost:Connect(function()
+        Services.TweenService:Create(keyBox, TweenInfo.new(0.2), {
+            BackgroundColor3 = Color3.fromRGB(242, 242, 247)
+        }):Play()
+    end)
+    
+    local submitBtn = Instance.new("TextButton")
+    submitBtn.Size = UDim2.new(0, 330, 0, 45)
+    submitBtn.Position = UDim2.new(0.5, -165, 0, 260)
+    submitBtn.BackgroundColor3 = Color3.fromRGB(0, 122, 255)
+    submitBtn.Text = "Verify License"
+    submitBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    submitBtn.TextSize = 16
+    submitBtn.Font = Enum.Font.GothamBold
+    submitBtn.BorderSizePixel = 0
+    submitBtn.Parent = authFrame
+    
+    local submitBtnCorner = Instance.new("UICorner", submitBtn)
+    submitBtnCorner.CornerRadius = UDim.new(0, 12)
+    
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Size = UDim2.new(1, -40, 0, 30)
+    statusLabel.Position = UDim2.new(0, 20, 0, 320)
+    statusLabel.Text = ""
+    statusLabel.TextColor3 = Color3.fromRGB(255, 59, 48)
+    statusLabel.TextSize = 12
+    statusLabel.Font = Enum.Font.GothamMedium
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.TextWrapped = true
+    statusLabel.TextScaled = false
+    statusLabel.Parent = authFrame
+    
+    local getKeyBtn = Instance.new("TextButton")
+    getKeyBtn.Size = UDim2.new(0, 180, 0, 38)
+    getKeyBtn.Position = UDim2.new(0.5, -90, 0, 370)
+    getKeyBtn.BackgroundColor3 = Color3.fromRGB(242, 242, 247)
+    getKeyBtn.Text = "Get License"
+    getKeyBtn.TextColor3 = Color3.fromRGB(0, 122, 255)
+    getKeyBtn.TextSize = 14
+    getKeyBtn.Font = Enum.Font.GothamMedium
+    getKeyBtn.BorderSizePixel = 0
+    getKeyBtn.Parent = authFrame
+    
+    local getKeyCorner = Instance.new("UICorner", getKeyBtn)
+    getKeyCorner.CornerRadius = UDim.new(0, 12)
+    
+    getKeyBtn.MouseButton1Click:Connect(function()
+        setclipboard("https://keyauth.win/panel/" .. KeyAuthApp .. "/licenses")
+        getKeyBtn.Text = "Link Copied!"
+        getKeyBtn.BackgroundColor3 = Color3.fromRGB(52, 199, 89)
+        getKeyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        wait(2)
+        getKeyBtn.Text = "Get License"
+        getKeyBtn.BackgroundColor3 = Color3.fromRGB(242, 242, 247)
+        getKeyBtn.TextColor3 = Color3.fromRGB(0, 122, 255)
+    end)
+    
+    local function verifyKey()
+        local key = keyBox.Text
+        if key == "" or #key < 10 then
+            statusLabel.Text = "Please enter a valid license key"
+            statusLabel.TextColor3 = Color3.fromRGB(255, 59, 48)
+            
+            local originalPos = authFrame.Position
+            for i = 1, 3 do
+                Services.TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos + UDim2.new(0, 10, 0, 0)}):Play()
+                wait(0.05)
+                Services.TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos - UDim2.new(0, 10, 0, 0)}):Play()
+                wait(0.05)
+            end
+            authFrame.Position = originalPos
+            return
+        end
+        
+        submitBtn.Text = "Verifying..."
+        submitBtn.BackgroundColor3 = Color3.fromRGB(142, 142, 147)
+        statusLabel.TextColor3 = Color3.fromRGB(0, 122, 255)
+        statusLabel.Text = "Verifying license..."
+        
+        local success, message = verifyLicense(key)
+        
+        if success then
+            isAuthorized = true
+            statusLabel.Text = message
+            statusLabel.TextColor3 = Color3.fromRGB(52, 199, 89)
+            
+            submitBtn.Text = "Verified!"
+            submitBtn.BackgroundColor3 = Color3.fromRGB(52, 199, 89)
+            
+            wait(1.5)
+            
+            Services.TweenService:Create(authFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+                Size = UDim2.new(0, 0, 0, 0),
+                Position = UDim2.new(0.5, 0, 0.5, 0)
+            }):Play()
+            
+            Services.TweenService:Create(darkBackground, TweenInfo.new(0.4), {
+                BackgroundTransparency = 1
+            }):Play()
+            
+            wait(0.4)
+            authGui:Destroy()
+            initializeScript()
+        else
+            submitBtn.Text = "Verify License"
+            submitBtn.BackgroundColor3 = Color3.fromRGB(0, 122, 255)
+            statusLabel.Text = message
+            statusLabel.TextColor3 = Color3.fromRGB(255, 59, 48)
+            
+            local originalPos = authFrame.Position
+            for i = 1, 3 do
+                Services.TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos + UDim2.new(0, 10, 0, 0)}):Play()
+                wait(0.05)
+                Services.TweenService:Create(authFrame, TweenInfo.new(0.05), {Position = originalPos - UDim2.new(0, 10, 0, 0)}):Play()
+                wait(0.05)
+            end
+            authFrame.Position = originalPos
+        end
+    end
+    
+    submitBtn.MouseButton1Click:Connect(verifyKey)
+    keyBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then
+            verifyKey()
+        end
+    end)
+    
+    authFrame.Size = UDim2.new(0, 0, 0, 0)
+    authFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+    
+    Services.TweenService:Create(authFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = UDim2.new(0, 380, 0, 460),
+        Position = UDim2.new(0.5, -190, 0.5, -230)
+    }):Play()
+end
+
+local isSpeedEnabled = false
+local originalSpeeds = {}
+local speedConnection = nil
+local currentSpeedKeybind = Enum.KeyCode.T
+local currentWalkSpeed = 300
+
+local function saveOriginalSpeed()
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        local humanoid = LocalPlayer.Character.Humanoid
+        if not originalSpeeds[humanoid] then
+            originalSpeeds[humanoid] = humanoid.WalkSpeed
+        end
+    end
+end
+
+local function updateSpeed()
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        local humanoid = LocalPlayer.Character.Humanoid
+        
+        if isSpeedEnabled then
+            humanoid.WalkSpeed = currentWalkSpeed
+        else
+            if originalSpeeds[humanoid] then
+                humanoid.WalkSpeed = originalSpeeds[humanoid]
+            end
+        end
+    end
+end
+
+local function setupWalkSpeed()
+    if speedConnection then
+        speedConnection:Disconnect()
+    end
+    
+    saveOriginalSpeed()
+    updateSpeed()
+    
+    LocalPlayer.CharacterAdded:Connect(function(character)
+        character:WaitForChild("Humanoid")
+        wait(0.1)
+        saveOriginalSpeed()
+        updateSpeed()
+    end)
+    
+    speedConnection = Services.RunService.Heartbeat:Connect(function()
+        if isSpeedEnabled then
+            updateSpeed()
+        end
+    end)
+end
+
+-- ════════════════════════════════════════════════════════════════
+-- КОНЕЦ МОДУЛЯ АВТОРИЗАЦИИ
+-- ════════════════════════════════════════════════════════════════
+-- После успешной авторизации isAuthorized станет true
+-- и скрипт продолжит загрузку остальных модулей
