@@ -306,6 +306,7 @@ local function verifyLicense(key)
     -- Используем ВАРИАНТ 3 (с повторными попытками)
     -- return verifyLicenseWithRetry(key, 2)
 end
+
 local function createAuthGUI()
     local authGui = Instance.new("ScreenGui")
     authGui.Name = "KeyAuthGUI"
