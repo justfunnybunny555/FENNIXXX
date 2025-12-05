@@ -27,22 +27,37 @@ local Services = {
 local LocalPlayer = Services.Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
---- KeyAuth Configuration
+--- KeyAuth Configuration - MULTI-OWNER SUPPORT
 local KeyAuthApp = "FENNIXXX"
-local KeyAuthOwnerID = "6oOmPZgEug"
+local KeyAuthOwnerIDs = {
+    "Gi9EhXEQsn",
+    -- Добавляйте дополнительные OwnerID сюда:
+    "B05VCYnbf0",
+    "6oOmPZgEug",
+    "edcEgR58Gp",
+    "Gi9EhXEQsn"
+}
 local KeyAuthVersion = "1.0"
 local KeyAuthURL = "https://keyauth.win/api/1.2/"
 
 local isAuthorized = false
 local sessionID = ""
 local scriptEnabled = true
+local currentOwnerID = nil
 
 local function getHWID()
-    local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
-    return hwid
+    local success, hwid = pcall(function()
+        return game:GetService("RbxAnalyticsService"):GetClientId()
+    end)
+    if success then
+        return hwid
+    else
+        return tostring(game:GetService("HttpService"):GenerateGUID(false))
+    end
 end
 
-local function initKeyAuth()
+-- Инициализация KeyAuth для конкретного OwnerID
+local function initKeyAuth(ownerID)
     local success, response = pcall(function()
         return request({
             Url = KeyAuthURL,
@@ -50,12 +65,12 @@ local function initKeyAuth()
             Headers = {
                 ["Content-Type"] = "application/x-www-form-urlencoded"
             },
-            Body = "type=init&ver=" .. KeyAuthVersion .. "&name=" .. KeyAuthApp .. "&ownerid=" .. KeyAuthOwnerID
+            Body = "type=init&ver=" .. KeyAuthVersion .. "&name=" .. KeyAuthApp .. "&ownerid=" .. ownerID
         })
     end)
     
     if not success then
-        return false, "Connection failed"
+        return false, "Connection failed", nil
     end
     
     if response.StatusCode == 200 then
@@ -65,74 +80,231 @@ local function initKeyAuth()
         
         if decodeSuccess then
             if data.success then
-                sessionID = data.sessionid
-                return true, "Initialized"
+                return true, "Initialized", data.sessionid
             else
-                return false, data.message or "Init failed"
+                return false, data.message or "Init failed", nil
             end
         else
-            return false, "Invalid response"
+            return false, "Invalid response", nil
         end
     else
-        return false, "Server error: " .. response.StatusCode
+        return false, "Server error: " .. response.StatusCode, nil
     end
 end
 
-local function verifyLicense(key)
-    if not sessionID or sessionID == "" then
-        local initSuccess, initMsg = initKeyAuth()
-        if not initSuccess then
-            return false, "Failed to initialize: " .. initMsg
+-- Попытка инициализации со всеми OwnerID
+local function initializeWithAnyOwner()
+    for _, ownerID in ipairs(KeyAuthOwnerIDs) do
+        local success, message, sid = initKeyAuth(ownerID)
+        if success and sid then
+            sessionID = sid
+            currentOwnerID = ownerID
+            return true, "Initialized with owner: " .. ownerID
         end
-        wait(0.5)
+        wait(0.3)
     end
-    
+    return false, "Failed to initialize with any owner"
+end
+
+-- ВАРИАНТ 1: Последовательная проверка (пробует каждый OwnerID по очереди)
+local function verifyLicenseSequential(key)
     local hwid = getHWID()
     
-    local success, response = pcall(function()
-        return request({
-            Url = KeyAuthURL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/x-www-form-urlencoded"
-            },
-            Body = "type=license&key=" .. Services.HttpService:UrlEncode(key) ..
-                    "&sessionid=" .. sessionID ..
-                    "&name=" .. KeyAuthApp ..
-                    "&ownerid=" .. KeyAuthOwnerID ..
-                    "&hwid=" .. hwid
-        })
-    end)
-    
-    if not success then
-        return false, "Connection failed"
-    end
-    
-    if response.StatusCode == 200 then
-        local decodeSuccess, data = pcall(function()
-            return Services.HttpService:JSONDecode(response.Body)
-        end)
-        
-        if decodeSuccess then
-            if data.success then
-                local exp = "Lifetime"
-                if data.info and data.info.subscriptions then
-                    for _, sub in pairs(data.info.subscriptions) do
-                        if sub.expiry and sub.expiry ~= "lifetime" then
-                            exp = os.date("%m/%d/%Y %H:%M", tonumber(sub.expiry))
+    for _, ownerID in ipairs(KeyAuthOwnerIDs) do
+        -- Инициализируем для каждого OwnerID
+        local initSuccess, initMsg, sid = initKeyAuth(ownerID)
+        if initSuccess and sid then
+            wait(0.3)
+            
+            local success, response = pcall(function()
+                return request({
+                    Url = KeyAuthURL,
+                    Method = "POST",
+                    Headers = {
+                        ["Content-Type"] = "application/x-www-form-urlencoded"
+                    },
+                    Body = "type=license&key=" .. Services.HttpService:UrlEncode(key) ..
+                           "&sessionid=" .. sid ..
+                           "&name=" .. KeyAuthApp ..
+                           "&ownerid=" .. ownerID ..
+                           "&hwid=" .. hwid
+                })
+            end)
+            
+            if success and response.StatusCode == 200 then
+                local decodeSuccess, data = pcall(function()
+                    return Services.HttpService:JSONDecode(response.Body)
+                end)
+                
+                if decodeSuccess and data.success then
+                    sessionID = sid
+                    currentOwnerID = ownerID
+                    
+                    local exp = "Lifetime"
+                    if data.info and data.info.subscriptions then
+                        for _, sub in pairs(data.info.subscriptions) do
+                            if sub.expiry and sub.expiry ~= "lifetime" then
+                                exp = os.date("%m/%d/%Y %H:%M", tonumber(sub.expiry))
+                            end
                         end
                     end
+                    return true, "License verified! (Owner: " .. ownerID:sub(1,6) .. "...) Expires: " .. exp
                 end
-                return true, "License verified! Expires: " .. exp
-            else
-                return false, data.message or "Invalid license key"
             end
-        else
-            return false, "Invalid response from server"
         end
-    else
-        return false, "Server error: " .. response.StatusCode
+        wait(0.2)
     end
+    
+    return false, "Invalid license key or all owners failed"
+end
+
+-- ВАРИАНТ 2: Параллельная проверка (пробует все OwnerID одновременно)
+local function verifyLicenseParallel(key)
+    local hwid = getHWID()
+    local results = {}
+    local completed = 0
+    local totalOwners = #KeyAuthOwnerIDs
+    
+    for index, ownerID in ipairs(KeyAuthOwnerIDs) do
+        spawn(function()
+            local initSuccess, initMsg, sid = initKeyAuth(ownerID)
+            if initSuccess and sid then
+                wait(0.2)
+                
+                local success, response = pcall(function()
+                    return request({
+                        Url = KeyAuthURL,
+                        Method = "POST",
+                        Headers = {
+                            ["Content-Type"] = "application/x-www-form-urlencoded"
+                        },
+                        Body = "type=license&key=" .. Services.HttpService:UrlEncode(key) ..
+                               "&sessionid=" .. sid ..
+                               "&name=" .. KeyAuthApp ..
+                               "&ownerid=" .. ownerID ..
+                               "&hwid=" .. hwid
+                    })
+                end)
+                
+                if success and response.StatusCode == 200 then
+                    local decodeSuccess, data = pcall(function()
+                        return Services.HttpService:JSONDecode(response.Body)
+                    end)
+                    
+                    if decodeSuccess and data.success then
+                        results[index] = {
+                            success = true,
+                            ownerID = ownerID,
+                            sessionID = sid,
+                            data = data
+                        }
+                    else
+                        results[index] = {success = false}
+                    end
+                else
+                    results[index] = {success = false}
+                end
+            else
+                results[index] = {success = false}
+            end
+            completed = completed + 1
+        end)
+    end
+    
+    -- Ждем завершения всех запросов (максимум 10 секунд)
+    local startTime = tick()
+    while completed < totalOwners and (tick() - startTime) < 10 do
+        wait(0.1)
+    end
+    
+    -- Проверяем результаты
+    for index, result in pairs(results) do
+        if result.success then
+            sessionID = result.sessionID
+            currentOwnerID = result.ownerID
+            
+            local exp = "Lifetime"
+            if result.data.info and result.data.info.subscriptions then
+                for _, sub in pairs(result.data.info.subscriptions) do
+                    if sub.expiry and sub.expiry ~= "lifetime" then
+                        exp = os.date("%m/%d/%Y %H:%M", tonumber(sub.expiry))
+                    end
+                end
+            end
+            return true, "License verified! (Owner: " .. result.ownerID:sub(1,6) .. "...) Expires: " .. exp
+        end
+    end
+    
+    return false, "Invalid license key or all owners failed"
+end
+
+-- ВАРИАНТ 3: С повторными попытками и задержками
+local function verifyLicenseWithRetry(key, maxRetries)
+    maxRetries = maxRetries or 2
+    local hwid = getHWID()
+    
+    for _, ownerID in ipairs(KeyAuthOwnerIDs) do
+        for retry = 1, maxRetries do
+            local initSuccess, initMsg, sid = initKeyAuth(ownerID)
+            if initSuccess and sid then
+                wait(0.3)
+                
+                local success, response = pcall(function()
+                    return request({
+                        Url = KeyAuthURL,
+                        Method = "POST",
+                        Headers = {
+                            ["Content-Type"] = "application/x-www-form-urlencoded"
+                        },
+                        Body = "type=license&key=" .. Services.HttpService:UrlEncode(key) ..
+                               "&sessionid=" .. sid ..
+                               "&name=" .. KeyAuthApp ..
+                               "&ownerid=" .. ownerID ..
+                               "&hwid=" .. hwid
+                })
+                end)
+                
+                if success and response.StatusCode == 200 then
+                    local decodeSuccess, data = pcall(function()
+                        return Services.HttpService:JSONDecode(response.Body)
+                    end)
+                    
+                    if decodeSuccess and data.success then
+                        sessionID = sid
+                        currentOwnerID = ownerID
+                        
+                        local exp = "Lifetime"
+                        if data.info and data.info.subscriptions then
+                            for _, sub in pairs(data.info.subscriptions) do
+                                if sub.expiry and sub.expiry ~= "lifetime" then
+                                    exp = os.date("%m/%d/%Y %H:%M", tonumber(sub.expiry))
+                                end
+                            end
+                        end
+                        return true, "License verified! (Owner: " .. ownerID:sub(1,6) .. "..., Try: " .. retry .. ") Expires: " .. exp
+                    end
+                end
+                
+                if retry < maxRetries then
+                    wait(0.5)
+                end
+            end
+        end
+    end
+    
+    return false, "Invalid license key or all attempts failed"
+end
+
+-- Выбор метода проверки (можно изменить)
+local function verifyLicense(key)
+    -- Используем ВАРИАНТ 1 (последовательная проверка)
+    -- return verifyLicenseSequential(key)
+    
+    -- Используем ВАРИАНТ 2 (параллельная проверка - быстрее)
+    return verifyLicenseParallel(key)
+    
+    -- Используем ВАРИАНТ 3 (с повторными попытками)
+    -- return verifyLicenseWithRetry(key, 2)
 end
 
 local function createAuthGUI()
