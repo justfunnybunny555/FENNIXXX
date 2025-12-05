@@ -32,7 +32,7 @@ local KeyAuthApp = "FENNIXXX"
 local KeyAuthOwnerIDs = {
     "Gi9EhXEQsn",
     -- Добавляйте дополнительные OwnerID сюда:
-    "B05VCYnbf0",
+    "B05VCYnbf0"
     "6oOmPZgEug",
     "edcEgR58Gp",
     "Gi9EhXEQsn"
@@ -306,7 +306,6 @@ local function verifyLicense(key)
     -- Используем ВАРИАНТ 3 (с повторными попытками)
     -- return verifyLicenseWithRetry(key, 2)
 end
-
 local function createAuthGUI()
     local authGui = Instance.new("ScreenGui")
     authGui.Name = "KeyAuthGUI"
