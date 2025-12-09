@@ -63,7 +63,7 @@ local Camera = workspace.CurrentCamera
 --- KeyAuth Configuration - MULTI-OWNER SUPPORT
 local KeyAuthApp = "FENNIXXX"
 local KeyAuthOwnerIDs = {
-    "Gi9EhXEQsn",
+    "VBgnbrhE4n",
     "B05VCYnbf0",
     "6oOmPZgEug",
     "edcEgR58Gp",
