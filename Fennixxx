@@ -67,7 +67,8 @@ local KeyAuthOwnerIDs = {
     "VBgnbrhE4n",
     "6oOmPZgEug",
     "edcEgR58Gp",
-    "VBgnbrhE4n"
+    "VBgnbrhE4n",
+    "B05VCYnbf0"
 }
 local KeyAuthVersion = "1.0"
 local KeyAuthURL = "https://keyauth.win/api/1.2/"
